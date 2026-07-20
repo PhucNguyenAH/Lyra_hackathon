@@ -18,6 +18,10 @@ pyyaml>=6.0
 # vLLM
 vllm
 
+# Cloud LLM (expectations extraction)
+openai>=1.40.0
+google-genai>=1.0.0
+
 # Embedding / PDF extraction
 numpy>=1.24.0
 pypdf>=4.0.0
