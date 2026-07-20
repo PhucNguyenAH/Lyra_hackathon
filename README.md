@@ -17,14 +17,44 @@ git push -u origin <your-branch>
 ## Job scraper
 ### Install environment
 
+Create and activate the conda env **before** installing or running anything.
+If you skip activation, `python`/`python3` may point at pyenv/system Python
+and packages won't be found.
+
+If `conda: command not found`, initialize conda for your shell first:
+
 ```
-conda create -n hack python=3.11 
+source /opt/anaconda3/etc/profile.d/conda.sh
+conda activate hack
+```
+
+Then install (first time only):
+
+```
+conda create -n hack python=3.11   # skip if env already exists
 conda activate hack
 pip install -e .
 pip install -r requirements.txt
-playwright install chromium
+python -m playwright install chromium
 ```
+
+Verify you're in the right env:
+
+```
+which python    # should show .../envs/hack/bin/python
+python -c "import playwright; print('ok')"
+```
+
+**Shortcut without conda activate** (works even if conda isn't in PATH):
+
+```
+/opt/anaconda3/envs/hack/bin/python create_session.py
+```
+
 ### Create session
+
+With the `hack` env active (or use the full python path above):
+
 ```
 python create_session.py
 ```
@@ -80,4 +110,21 @@ Each `.pkl` holds one dict:
   "dim": int,
 }
 ```
+
+## Job matcher
+
+`matcher.py` ranks the embedded jobs against the embedded resume by cosine
+similarity. It only needs numpy (no GPU/vLLM/browser), so run it any time
+after `extractor.py`:
+
+```
+python matcher.py
+```
+
+It prints the ranking and writes it to `matches.json`. Flags: `--job-dir` /
+`--resume-dir` (embedding dirs), `--out` (output JSON), `--top` (keep only the
+top N matches).
+
+> Note: raw cosine scores from the same search tend to cluster in a narrow
+> band — treat them as a ranking, not a "match %".
 
