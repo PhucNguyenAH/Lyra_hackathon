@@ -14,3 +14,10 @@ py2neo>=2021.2.3
 # CLI
 click>=8.0.0
 pyyaml>=6.0
+
+# vLLM
+vllm
+
+# Embedding / PDF extraction
+numpy>=1.24.0
+pypdf>=4.0.0
