@@ -1,65 +1,257 @@
-import Image from "next/image";
+"use client";
+
+import React, { useState } from "react";
+import { DashboardLayout } from "@/components/dashboard-layout";
+import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
+import { JobsDashboard, JobPosting } from "@/components/jobs-dashboard";
+import { CVEditorWorkspace } from "@/components/cv-editor/cv-editor-workspace";
+import { InterviewWorkspace } from "@/components/interview-practice/interview-workspace";
+import { CVData } from "@/components/cv-editor/cv-pdf-preview";
+
+type TabId = "drafts" | "cv-editor" | "jobs" | "interview";
 
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<TabId>("drafts");
+  const [selectedDraftId, setSelectedDraftId] = useState<string>("draft-1");
+
+  // Hoisted Drafts State
+  const [drafts, setDrafts] = useState<CVDraft[]>([
+    {
+      id: "draft-1",
+      title: "Kian Nguyen",
+      role: "Backend Engineer",
+      level: "Junior (0-2 years)",
+      source: "PDF import",
+      updated: "5/26/2026",
+      exported: "5/26/2026",
+    },
+  ]);
+
+  // Hoisted CV Experience Data State
+  const [cvDatabase, setCvDatabase] = useState<{ [draftId: string]: CVData }>({
+    "draft-1": initialKianCVData,
+  });
+
+  // Hoisted Jobs State
+  const [jobs, setJobs] = useState<JobPosting[]>([
+    {
+      id: "job-1",
+      title: "Backend Engineer (Java / Spring Boot)",
+      company: "InnovateTech Solutions",
+      location: "Sydney, NSW (Hybrid)",
+      matchScore: 92,
+      skillsRequired: ["Java", "Spring Boot", "Spring Security", "PostgreSQL", "Docker", "AWS", "CI/CD"],
+      skillsMatched: ["Java", "Spring Boot", "Spring Security", "PostgreSQL", "Docker", "AWS", "CI/CD"],
+    },
+    {
+      id: "job-2",
+      title: "Senior Frontend Architect",
+      company: "Vercel Partner Studio",
+      location: "Sydney, NSW (Remote)",
+      matchScore: 62,
+      skillsRequired: ["Next.js", "React.js", "TypeScript", "TailwindCSS", "Prisma", "AWS", "Performance Optimization"],
+      skillsMatched: ["React.js", "TypeScript", "TailwindCSS", "Prisma", "AWS"],
+    },
+    {
+      id: "job-3",
+      title: "AI Engineer & Full Stack developer",
+      company: "CognitiveAgents Corp",
+      location: "Sydney, NSW (On-site)",
+      matchScore: 84,
+      skillsRequired: ["Python", "FastAPI", "LangChain", "ChromaDB", "React.js", "Next.js", "Docker"],
+      skillsMatched: ["Python", "FastAPI", "LangChain", "ChromaDB", "React.js", "Next.js", "Docker"],
+    },
+  ]);
+
+  // Handle Select Draft from Dashboard
+  const handleSelectDraft = (id: string) => {
+    setSelectedDraftId(id);
+    setActiveTab("cv-editor");
+  };
+
+  // Handle Delete Draft
+  const handleDeleteDraft = (id: string) => {
+    setDrafts((prev) => prev.filter((d) => d.id !== id));
+    // Clean up corresponding database entry
+    setCvDatabase((prev) => {
+      const updated = { ...prev };
+      delete updated[id];
+      return updated;
+    });
+  };
+
+  // Handle Import/Parse PDF to create a new draft
+  const handleImportCV = (name: string, role: string, level: string) => {
+    const newId = `draft-${Date.now()}`;
+    const newDraft: CVDraft = {
+      id: newId,
+      title: name,
+      role: role,
+      level: level,
+      source: "PDF import",
+      updated: new Date().toLocaleDateString(),
+      exported: "Never",
+    };
+
+    const newCVDetails: CVData = {
+      fullName: name,
+      email: `${name.toLowerCase().replace(/\s+/g, "")}.works@gmail.com`,
+      phone: "(415) 555-0123",
+      location: "Sydney, NSW",
+      github: "https://github.com/imported",
+      linkedin: "https://linkedin.com/in/imported",
+      summary: `Software engineer experienced in targeting ${role} roles at a ${level} level. Skilled in collaborative coding, unit testing, and design architectures.`,
+      skills: [
+        {
+          id: `cat-imported-1`,
+          name: "Core Skills",
+          items: ["REST APIs", "SQL", "Git", "Docker"],
+        },
+      ],
+      experience: [
+        {
+          company: "Previous Tech Employer",
+          role: role,
+          location: "Sydney, Australia",
+          date: "2024 - Present",
+          bullets: [
+            "Contributed to core development features targeting high scalability systems.",
+            "Collaborated with product designers and engineering leads to launch SaaS apps.",
+          ],
+        },
+      ],
+    };
+
+    setDrafts((prev) => [newDraft, ...prev]);
+    setCvDatabase((prev) => ({ ...prev, [newId]: newCVDetails }));
+    setSelectedDraftId(newId);
+    setActiveTab("cv-editor");
+  };
+
+  // Handle Save CV details from Editor
+  const handleSaveCVData = (updatedData: CVData) => {
+    setCvDatabase((prev) => ({ ...prev, [selectedDraftId]: updatedData }));
+    setDrafts((prev) =>
+      prev.map((d) => {
+        if (d.id === selectedDraftId) {
+          return {
+            ...d,
+            title: updatedData.fullName,
+            updated: new Date().toLocaleDateString(),
+          };
+        }
+        return d;
+      })
+    );
+  };
+
+  // Handle Tailor CV CTA from Jobs Dashboard
+  const handleTailorCV = (jobId: string) => {
+    const job = jobs.find((j) => j.id === jobId);
+    if (job) {
+      // 1. Setup the active editing draft's targeted role to match the job title
+      setDrafts((prev) =>
+        prev.map((d) => {
+          if (d.id === selectedDraftId) {
+            return {
+              ...d,
+              role: job.title,
+            };
+          }
+          return d;
+        })
+      );
+      // 2. Open CV Editor Workspace
+      setActiveTab("cv-editor");
+    }
+  };
+
+  const currentDraftData = cvDatabase[selectedDraftId] || initialKianCVData;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <DashboardLayout activeTab={activeTab} setActiveTab={setActiveTab}>
+      {activeTab === "drafts" && (
+        <DraftsDashboard
+          drafts={drafts}
+          onSelectDraft={handleSelectDraft}
+          onImportCV={handleImportCV}
+          onDeleteDraft={handleDeleteDraft}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      )}
+
+      {activeTab === "cv-editor" && (
+        <CVEditorWorkspace
+          initialData={currentDraftData}
+          onBack={() => setActiveTab("drafts")}
+          onSave={handleSaveCVData}
+        />
+      )}
+
+      {activeTab === "jobs" && (
+        <JobsDashboard jobs={jobs} onTailorCV={handleTailorCV} />
+      )}
+
+      {activeTab === "interview" && <InterviewWorkspace />}
+    </DashboardLayout>
   );
 }
+
+// Initial mockup CV Data for Kian Nguyen matching Image 1
+const initialKianCVData: CVData = {
+  fullName: "Kian Nguyen",
+  email: "kiannguyen.works@gmail.com",
+  phone: "(415) 555-0123",
+  location: "Sydney, NSW",
+  github: "https://github.com/khnguyenn",
+  linkedin: "https://www.linkedin.com/in/khngtran2301",
+  summary:
+    "Software Engineering and AI student with hands-on experience building and deploying production-scale backend systems, AI agent pipelines, and full-stack web applications. Skilled in Java Spring Boot, Python, LLM integration, REST API design, Docker, CI/CD, and AWS. Passionate about building reliable, well-tested, and intelligent software at scale.",
+  skills: [
+    {
+      id: "cat-prog",
+      name: "Programming Languages",
+      items: ["Java", "Python", "JavaScript", "TypeScript", "C++", "SQL"],
+    },
+    {
+      id: "cat-frame",
+      name: "Frameworks & Tools",
+      items: [
+        "Spring Boot",
+        "Spring Security",
+        "React.js",
+        "Next.js",
+        "FastAPI",
+        "LangChain",
+        "LangGraph",
+        "Prisma",
+        "Supabase",
+        "PostgreSQL",
+        "ChromaDB",
+        "MongoDB",
+        "PyTorch",
+        "TailwindCSS",
+        "Docker",
+        "Git",
+        "Postman",
+        "GitHub Actions",
+      ],
+    },
+    {
+      id: "cat-cloud",
+      name: "Cloud & DevOps",
+      items: ["AWS (EC2, RDS, Amplify, S3, IAM)", "Docker", "CI/CD", "GitHub Actions"],
+    },
+  ],
+  experience: [
+    {
+      company: "Macquarie University",
+      role: "Software Developer Intern",
+      location: "NSW, Australia",
+      date: "Dec 2025 - Mar 2026",
+      bullets: [
+        "Supported 1,000+ student workflows by developing a scalable learning platform using Next.js, TypeScript, and Supabase, handling 300,000+ requests in a single week.",
+        "Built an LLM-powered question generation pipeline using LangChain and Claude API - chunked student lectures, generating contextual interactive questions, and serving 1,000+ LLM requests.",
+      ],
+    },
+  ],
+};
