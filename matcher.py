@@ -53,7 +53,10 @@ def evaluate_job(haystack: str, exp: dict) -> dict:
 
     Returns {"excluded_by": str | None, "boost": float,
              "matched_must_haves": [...], "missing_must_haves": [...],
-             "flags": [...]}.
+             "matched": [...], "flags": [...]}.
+
+    "matched" holds positive signals (criteria the posting satisfies) and
+    "flags" the warnings, so the output reports both sides symmetrically.
     """
     hay = haystack.lower()
     result = {
@@ -61,6 +64,7 @@ def evaluate_job(haystack: str, exp: dict) -> dict:
         "boost": 0.0,
         "matched_must_haves": [],
         "missing_must_haves": [],
+        "matched": [],
         "flags": [],
     }
 
@@ -74,6 +78,10 @@ def evaluate_job(haystack: str, exp: dict) -> dict:
         result["matched_must_haves"] = [s for s in must if s.lower() in hay]
         result["missing_must_haves"] = [s for s in must if s.lower() not in hay]
         result["boost"] += W_SKILLS * len(result["matched_must_haves"]) / len(must)
+        if result["matched_must_haves"]:
+            result["matched"].append(
+                "skills: " + ", ".join(result["matched_must_haves"])
+            )
         if result["missing_must_haves"]:
             result["flags"].append(
                 "missing skills: " + ", ".join(result["missing_must_haves"])
@@ -81,8 +89,10 @@ def evaluate_job(haystack: str, exp: dict) -> dict:
 
     locations = exp.get("locations") or []
     if locations:
-        if any(loc.lower() in hay for loc in locations):
+        hits = [loc for loc in locations if loc.lower() in hay]
+        if hits:
             result["boost"] += W_LOCATION
+            result["matched"].append("location: " + ", ".join(hits))
         else:
             result["flags"].append(
                 "location not mentioned: " + ", ".join(locations)
@@ -93,14 +103,19 @@ def evaluate_job(haystack: str, exp: dict) -> dict:
         # Soft signal only — postings often omit the mode, so warn, don't drop.
         if work_mode in hay:
             result["boost"] += W_WORK_MODE
+            result["matched"].append(f"work mode: {work_mode}")
         else:
             result["flags"].append(f"work mode '{work_mode}' not mentioned")
 
     seniority = exp.get("seniority") or []
-    if seniority and not any(s.lower() in hay for s in seniority):
-        result["flags"].append(
-            "seniority not mentioned: " + ", ".join(seniority)
-        )
+    if seniority:
+        hits = [s for s in seniority if s.lower() in hay]
+        if hits:
+            result["matched"].append("seniority: " + ", ".join(hits))
+        else:
+            result["flags"].append(
+                "seniority not mentioned: " + ", ".join(seniority)
+            )
 
     salary_min = exp.get("salary_min")
     if salary_min:
@@ -111,6 +126,12 @@ def evaluate_job(haystack: str, exp: dict) -> dict:
             result["flags"].append(
                 f"salary below minimum (posting mentions {max(found):,}, "
                 f"want {salary_min:,})"
+            )
+        else:
+            lo, hi = min(found), max(found)
+            mentioned = f"{lo:,}–{hi:,}" if lo != hi else f"{lo:,}"
+            result["matched"].append(
+                f"salary: posting mentions {mentioned} (meets {salary_min:,} min)"
             )
 
     return result
@@ -155,6 +176,7 @@ def rank(
             entry["adjusted_score"] = entry["score"] + verdict["boost"]
             entry["matched_must_haves"] = verdict["matched_must_haves"]
             entry["missing_must_haves"] = verdict["missing_must_haves"]
+            entry["matched"] = verdict["matched"]
             entry["flags"] = verdict["flags"]
         matches.append(entry)
 
@@ -226,8 +248,8 @@ def main():
         print(f"{r['rank']:>2}. [{shown:.3f}] {r['job_title']} @ {r['company']}")
         print(f"       {r['url']}")
         if expectations:
-            if r["matched_must_haves"]:
-                print(f"       + skills: {', '.join(r['matched_must_haves'])}")
+            for hit in r["matched"]:
+                print(f"       + {hit}")
             for flag in r["flags"]:
                 print(f"       ! {flag}")
 

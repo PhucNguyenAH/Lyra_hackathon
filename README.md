@@ -178,8 +178,9 @@ With `--expectations`:
   become `flags` warnings, not exclusions — LinkedIn text is too noisy to
   hard-drop on the absence of a keyword.
 - `matches.json` becomes `{"matches": [...], "excluded": [...]}`, and each
-  match gains `adjusted_score`, `matched_must_haves`, `missing_must_haves`
-  and `flags`.
+  match gains `adjusted_score`, `matched_must_haves`, `missing_must_haves`,
+  `matched` (positive signals: satisfied skills/location/work-mode/seniority/
+  salary criteria) and `flags` (warnings).
 
 > Salary limitation: `salary_min` is only checked when a salary figure can be
 > found in the posting text (regex). LinkedIn postings rarely list one, so
