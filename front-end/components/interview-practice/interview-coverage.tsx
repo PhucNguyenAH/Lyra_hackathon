@@ -20,8 +20,8 @@ export function InterviewCoverage({ coverage }: InterviewCoverageProps) {
   const completedCount = coverage.filter((c) => c.status === "completed").length;
 
   return (
-    <Card className="border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md shadow-sm h-full flex flex-col">
-      <CardHeader className="pb-3 flex-shrink-0">
+    <Card className="h-fit border-zinc-200 bg-white shadow-none dark:border-zinc-800 dark:bg-zinc-900">
+      <CardHeader className="pb-2">
         <CardTitle className="text-base font-semibold flex items-center justify-between">
           <span>Syllabus Coverage</span>
           <span className="text-xs font-semibold text-zinc-400 dark:text-zinc-500">
@@ -32,15 +32,15 @@ export function InterviewCoverage({ coverage }: InterviewCoverageProps) {
           Targeted categories evaluated in this practice session.
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex-1 overflow-y-auto min-h-0 pr-2 space-y-3">
+      <CardContent className="space-y-2 pt-1">
         {coverage.map((topic) => (
           <div
             key={topic.id}
             className={cn(
-              "flex items-center justify-between p-3 rounded-lg border text-xs transition-all duration-300",
+              "flex items-center justify-between rounded-lg border px-3 py-2.5 text-xs transition-all duration-300",
               topic.status === "active"
                 ? "bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 dark:border-indigo-400 font-semibold"
-                : "bg-white dark:bg-zinc-950/30 border-zinc-150 dark:border-zinc-850"
+                : "bg-white dark:bg-zinc-950/30 border-zinc-100 dark:border-zinc-800"
             )}
           >
             <div className="flex items-center gap-2.5">

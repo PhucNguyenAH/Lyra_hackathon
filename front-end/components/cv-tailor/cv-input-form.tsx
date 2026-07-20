@@ -45,7 +45,7 @@ export function CVInputForm({ onSubmit, isLoading }: CVInputFormProps) {
                 variant="outline"
                 size="sm"
                 onClick={loadExample}
-                className="text-xs h-8 flex items-center gap-1 border-zinc-200 dark:border-zinc-850 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                className="text-xs h-8 flex items-center gap-1 border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800"
               >
                 <RefreshCw className="h-3 w-3" />
                 Reset Example

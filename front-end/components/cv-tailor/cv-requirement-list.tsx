@@ -50,7 +50,7 @@ export function CVRequirementList({
                 "group flex flex-col p-3 rounded-lg border text-left transition-all duration-300",
                 isHighlighted
                   ? "bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 dark:border-indigo-400 shadow-sm scale-[1.01]"
-                  : "bg-white dark:bg-zinc-950/30 border-zinc-150 dark:border-zinc-850 hover:border-zinc-300 dark:hover:border-zinc-750"
+                  : "bg-white dark:bg-zinc-950/30 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
               )}
             >
               <div className="flex items-start justify-between gap-3">

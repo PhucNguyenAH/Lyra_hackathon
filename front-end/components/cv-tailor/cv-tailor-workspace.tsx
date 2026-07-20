@@ -85,11 +85,11 @@ export function CVTailorWorkspace() {
       {viewState === "STEP_3_ENHANCE" && (
         <div className="flex flex-col flex-1 min-h-0 space-y-6 animate-in fade-in-50 duration-300">
           {/* Top Wizard Steps Header */}
-          <div className="flex items-center justify-center gap-2 text-xs font-semibold py-2 px-4 rounded-xl bg-zinc-150/40 dark:bg-zinc-900/40 border border-zinc-200/20 max-w-md mx-auto">
+          <div className="flex items-center justify-center gap-2 text-xs font-semibold py-2 px-4 rounded-xl bg-zinc-100/40 dark:bg-zinc-900/40 border border-zinc-200/20 max-w-md mx-auto">
             <span className="text-zinc-400 dark:text-zinc-500">1. Job Details</span>
-            <ArrowRight className="h-3 w-3 text-zinc-350" />
+            <ArrowRight className="h-3 w-3 text-zinc-300" />
             <span className="text-zinc-400 dark:text-zinc-500">2. Match Analysis</span>
-            <ArrowRight className="h-3 w-3 text-zinc-350" />
+            <ArrowRight className="h-3 w-3 text-zinc-300" />
             <span className="text-indigo-600 dark:text-indigo-400 font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50">3. Suggested Enhancements</span>
           </div>
 

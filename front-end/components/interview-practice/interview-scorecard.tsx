@@ -71,7 +71,7 @@ export function InterviewScorecard({ score, questionText, answerText }: Intervie
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
             {starMetrics.map((m) => (
-              <div key={m.label} className="flex flex-col p-2.5 rounded-lg bg-zinc-150/40 dark:bg-zinc-800/20 border border-zinc-200/20">
+              <div key={m.label} className="flex flex-col p-2.5 rounded-lg bg-zinc-100/40 dark:bg-zinc-800/20 border border-zinc-200/20">
                 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
                   {m.label}
                 </span>

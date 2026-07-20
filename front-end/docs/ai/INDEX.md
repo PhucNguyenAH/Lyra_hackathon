@@ -4,6 +4,14 @@ This index tracks key architectural and UI decisions made during the development
 
 | Date | Title | Type | Status |
 |------|-------|------|--------|
+| 2026-07-20 | Minimalist Resumes Version Control Hub & Monitoring Dashboard | UI | accepted |
+| 2026-07-20 | Scrollable Target Jobs feed & Refreshed intervals | UI | accepted |
+| 2026-07-20 | Minimalist CV Uploader & Neutral Theme Audit | UI | accepted |
+| 2026-07-20 | Exam Mode Fullscreen Simulator & Sidebar Refinement | UI | accepted |
+| 2026-07-20 | Mock Interview Session Controls | UI | accepted |
+| 2026-07-20 | Interactive STAR Report Assessment Dashboard | UI | accepted |
+| 2026-07-20 | Minimalist Overview Hub & Streamlined CV Editor | UI | accepted |
+| 2026-07-20 | UI/UX Audit & Responsive Refinement | UI | accepted |
 | 2026-07-20 | Interview Blind Mode & Post-Session Reporting | UI | accepted |
 | 2026-07-20 | Athena Overview Hub | UI | accepted |
 | 2026-07-20 | Athena Editor Reordering & Tailored Suggestions | UI | accepted |

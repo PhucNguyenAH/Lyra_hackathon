@@ -57,7 +57,7 @@ export function CVChangeSummary({ stats }: CVChangeSummaryProps) {
 
           {/* Action Counts */}
           <div className="grid grid-cols-3 col-span-2 gap-4">
-            <div className="flex flex-col p-3 rounded-xl border border-zinc-150 dark:border-zinc-850 bg-white/30 dark:bg-zinc-950/20 justify-center">
+            <div className="flex flex-col p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white/30 dark:bg-zinc-950/20 justify-center">
               <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                 Reworded
               </span>
@@ -67,7 +67,7 @@ export function CVChangeSummary({ stats }: CVChangeSummaryProps) {
               <span className="text-[9px] text-zinc-400 mt-0.5">Optimized terminology</span>
             </div>
 
-            <div className="flex flex-col p-3 rounded-xl border border-zinc-150 dark:border-zinc-850 bg-white/30 dark:bg-zinc-950/20 justify-center">
+            <div className="flex flex-col p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white/30 dark:bg-zinc-950/20 justify-center">
               <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                 Emphasized
               </span>
@@ -77,7 +77,7 @@ export function CVChangeSummary({ stats }: CVChangeSummaryProps) {
               <span className="text-[9px] text-zinc-400 mt-0.5">Prioritized parameters</span>
             </div>
 
-            <div className="flex flex-col p-3 rounded-xl border border-zinc-150 dark:border-zinc-850 bg-white/30 dark:bg-zinc-950/20 justify-center">
+            <div className="flex flex-col p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-white/30 dark:bg-zinc-950/20 justify-center">
               <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                 Reordered
               </span>

@@ -77,7 +77,7 @@ export function CVTailoredPreview({
                           "p-3 rounded-lg border transition-all duration-300 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400",
                           isTraced
                             ? "bg-amber-500/5 dark:bg-amber-500/10 border-amber-500/40 dark:border-amber-500/30 text-zinc-900 dark:text-zinc-200 shadow-[0_0_12px_rgba(245,158,11,0.15)] scale-[1.005]"
-                            : "bg-white/40 dark:bg-zinc-950/20 border-zinc-150/50 dark:border-zinc-850/50"
+                            : "bg-white/40 dark:bg-zinc-950/20 border-zinc-100/50 dark:border-zinc-800/50"
                         )}
                       >
                         {bullet.text}
@@ -131,8 +131,8 @@ export function CVTailoredPreview({
                         className={cn(
                           "relative p-3 rounded-lg border text-xs leading-relaxed transition-all duration-300 cursor-help",
                           isHighlighted
-                            ? "bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 dark:border-indigo-400 text-zinc-900 dark:text-zinc-150 shadow-[0_0_12px_rgba(99,102,241,0.15)] scale-[1.01]"
-                            : "bg-white dark:bg-zinc-950/40 border-zinc-150 dark:border-zinc-850 hover:border-zinc-300 dark:hover:border-zinc-750 text-zinc-700 dark:text-zinc-300"
+                            ? "bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-500 dark:border-indigo-400 text-zinc-900 dark:text-zinc-100 shadow-[0_0_12px_rgba(99,102,241,0.15)] scale-[1.01]"
+                            : "bg-white dark:bg-zinc-950/40 border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-700 dark:text-zinc-300"
                         )}
                       >
                         {bullet.text}

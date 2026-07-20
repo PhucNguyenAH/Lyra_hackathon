@@ -157,7 +157,7 @@ export function SkillsTagEditor({ categories, onChange }: SkillsTagEditorProps) 
             {/* Category header title input + edit controls */}
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 flex-1">
-                <GripVertical className="h-4 w-4 text-zinc-400 dark:text-zinc-650 cursor-grab active:cursor-grabbing flex-shrink-0" />
+                <GripVertical className="h-4 w-4 text-zinc-400 dark:text-zinc-600 cursor-grab active:cursor-grabbing flex-shrink-0" />
                 <Input
                   value={category.name}
                   onChange={(e) => handleCategoryNameChange(category.id, e.target.value)}
@@ -182,13 +182,13 @@ export function SkillsTagEditor({ categories, onChange }: SkillsTagEditorProps) 
               {category.items.map((item) => (
                 <span
                   key={item}
-                  className="inline-flex items-center gap-1 rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-750/50"
+                  className="inline-flex items-center gap-1 rounded-full bg-zinc-100 dark:bg-zinc-800 px-3 py-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50"
                 >
                   {item}
                   <button
                     type="button"
                     onClick={() => handleRemoveSkill(category.id, item)}
-                    className="rounded-full p-0.5 text-zinc-450 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-100 transition-colors"
+                    className="rounded-full p-0.5 text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-100 transition-colors"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -235,7 +235,7 @@ export function SkillsTagEditor({ categories, onChange }: SkillsTagEditorProps) 
                   variant="outline"
                   size="sm"
                   onClick={() => setActiveInputCatId(category.id)}
-                  className="h-7 px-3 text-[11px] rounded-full border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1 text-zinc-550 border-dashed"
+                  className="h-7 px-3 text-[11px] rounded-full border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-1 text-zinc-500 border-dashed"
                 >
                   <Plus className="h-3 w-3" />
                   Add

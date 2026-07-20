@@ -52,7 +52,7 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
           </p>
         </div>
         <div className="relative w-full sm:w-72">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 dark:text-zinc-550" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400 dark:text-zinc-500" />
           <Input
             placeholder="Search roles or companies..."
             value={searchQuery}
@@ -116,7 +116,7 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-450 dark:text-zinc-500 font-semibold">Skills Analysis</span>
+                    <span className="text-zinc-400 dark:text-zinc-500 font-semibold">Skills Analysis</span>
                     <button
                       onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
                       className="text-indigo-600 dark:text-indigo-400 hover:underline font-bold text-[11px]"
@@ -181,17 +181,18 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
                 </div>
               </CardContent>
 
-              <CardFooter className="pt-3 border-t border-zinc-200/20 dark:border-zinc-800/20 flex items-center justify-between gap-3">
+              <CardFooter className="pt-3 border-t border-zinc-200/20 dark:border-zinc-800/20 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
                     size="icon"
                     onClick={() => toggleSaveJob(job.id)}
                     className={cn(
-                      "h-9 w-9 rounded-lg border-zinc-200 dark:border-zinc-850 hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                      "h-9 w-9 rounded-lg border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800",
                       isSaved && "text-red-500 border-red-500/20 bg-red-500/5 hover:bg-red-500/10 dark:hover:bg-red-500/10"
                     )}
                     title={isSaved ? "Saved" : "Save Job"}
+                    aria-label={isSaved ? "Unsave job" : "Save job"}
                   >
                     <Heart className={cn("h-4 w-4", isSaved && "fill-red-500 text-red-500")} />
                   </Button>
@@ -199,7 +200,7 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
                   <Button
                     variant="outline"
                     onClick={() => alert(`Simulating Application request for job ${job.title}...`)}
-                    className="h-9 px-3 border-zinc-200 dark:border-zinc-850 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 text-xs font-semibold text-zinc-700 dark:text-zinc-300"
+                    className="h-9 px-3 border-zinc-200 dark:border-zinc-800 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 text-xs font-semibold text-zinc-700 dark:text-zinc-300"
                   >
                     Apply Now
                   </Button>
@@ -207,7 +208,7 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
 
                 <Button
                   onClick={() => onTailorCV(job.id)}
-                  className="h-9 px-3 rounded-lg bg-indigo-600 dark:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-500/15 hover:bg-indigo-700 flex items-center gap-1"
+                  className="h-9 px-3 rounded-lg bg-indigo-600 dark:bg-indigo-500 text-white font-semibold text-xs shadow-md shadow-indigo-500/15 hover:bg-indigo-700 flex items-center gap-1 flex-shrink-0"
                 >
                   <Sparkles className="h-3.5 w-3.5 text-amber-300 fill-amber-300" />
                   Tailor CV for Job

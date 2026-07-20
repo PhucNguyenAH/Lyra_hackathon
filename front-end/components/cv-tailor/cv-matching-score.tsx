@@ -31,12 +31,12 @@ export function CVMatchingScore({ score, onProceed, onBack }: CVMatchingScorePro
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       {/* Top Wizard Steps Header */}
-      <div className="flex items-center justify-center gap-2 text-xs font-semibold py-2 px-4 rounded-xl bg-zinc-150/40 dark:bg-zinc-900/40 border border-zinc-200/20 max-w-md mx-auto">
+      <div className="flex items-center justify-center gap-2 text-xs font-semibold py-2 px-4 rounded-xl bg-zinc-100/40 dark:bg-zinc-900/40 border border-zinc-200/20 max-w-md mx-auto">
         <span className="text-zinc-400 dark:text-zinc-500">1. Job Details</span>
-        <ArrowRight className="h-3 w-3 text-zinc-350" />
+        <ArrowRight className="h-3 w-3 text-zinc-300" />
         <span className="text-indigo-600 dark:text-indigo-400 font-bold px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/50">2. Match Analysis</span>
-        <ArrowRight className="h-3 w-3 text-zinc-350" />
-        <span className="text-zinc-450 dark:text-zinc-500">3. Suggested Enhancements</span>
+        <ArrowRight className="h-3 w-3 text-zinc-300" />
+        <span className="text-zinc-400 dark:text-zinc-500">3. Suggested Enhancements</span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -78,7 +78,7 @@ export function CVMatchingScore({ score, onProceed, onBack }: CVMatchingScorePro
             </div>
           </CardContent>
           <CardFooter className="p-0 mt-6 flex flex-col space-y-2 w-full text-xs text-zinc-500 dark:text-zinc-400">
-            <div className="flex justify-between w-full py-1.5 border-b border-zinc-150/40 dark:border-zinc-850/40">
+            <div className="flex justify-between w-full py-1.5 border-b border-zinc-100/40 dark:border-zinc-800/40">
               <span>Syllabus Covered</span>
               <strong className="text-zinc-800 dark:text-zinc-200">3 / 5 topics</strong>
             </div>
@@ -101,7 +101,7 @@ export function CVMatchingScore({ score, onProceed, onBack }: CVMatchingScorePro
               </Badge>
             </div>
 
-            <p className="text-xs text-zinc-500 dark:text-zinc-450 leading-relaxed bg-zinc-100/30 dark:bg-zinc-950/20 p-3 rounded-lg border border-zinc-200/10">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed bg-zinc-100/30 dark:bg-zinc-950/20 p-3 rounded-lg border border-zinc-200/10">
               <strong>Evaluation Summary:</strong> Your Master CV shows strong general experience with React, team management, and client-side builds. However, the target role requires expert-level Next.js (App Router), Tailwind CSS v4, and modern animation specifications which are currently missing or not emphasized.
             </p>
 
@@ -125,7 +125,7 @@ export function CVMatchingScore({ score, onProceed, onBack }: CVMatchingScorePro
                       gap.type === "strength" ? "text-green-500" : gap.type === "gap" ? "text-red-500" : "text-amber-500"
                     )} />
                     <div className="space-y-0.5">
-                      <h4 className="font-bold text-zinc-800 dark:text-zinc-150">
+                      <h4 className="font-bold text-zinc-800 dark:text-zinc-100">
                         {gap.title}
                       </h4>
                       <p className="text-zinc-400 dark:text-zinc-500 text-[10px]">

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Mic, MicOff, Send, HelpCircle, User, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export interface Message {
   id: string;
@@ -92,59 +93,61 @@ export function InterviewChat({
         </CardTitle>
       </CardHeader>
 
-      {/* Messages timeline viewport */}
-      <CardContent className="flex-1 overflow-y-auto p-6 space-y-4 min-h-0">
-        {messages.map((msg) => {
-          const isInterviewer = msg.sender === "interviewer";
-          return (
-            <div
-              key={msg.id}
-              className={cn(
-                "flex gap-3 max-w-[85%] text-xs leading-relaxed animate-in fade-in-50 duration-200",
-                isInterviewer ? "mr-auto text-left" : "ml-auto flex-row-reverse text-left"
-              )}
-            >
-              {/* Avatar Icon */}
-              <div className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 border",
-                isInterviewer
-                  ? "bg-indigo-50 border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400"
-                  : "bg-zinc-100 border-zinc-200 text-zinc-600 dark:bg-zinc-850 dark:border-zinc-850 dark:text-zinc-400"
-              )}>
-                {isInterviewer ? <HelpCircle className="h-4 w-4" /> : <User className="h-4 w-4" />}
-              </div>
-
-              {/* Message Bubble Container */}
-              <div className="space-y-1">
+      {/* Messages timeline viewport using ScrollArea */}
+      <ScrollArea className="flex-1 p-6 pr-4 min-h-0">
+        <div className="space-y-4 pr-3 pb-4">
+          {messages.map((msg) => {
+            const isInterviewer = msg.sender === "interviewer";
+            return (
+              <div
+                key={msg.id}
+                className={cn(
+                  "flex gap-3 max-w-[85%] text-xs leading-relaxed animate-in fade-in-50 duration-200",
+                  isInterviewer ? "mr-auto text-left" : "ml-auto flex-row-reverse text-left"
+                )}
+              >
+                {/* Avatar Icon */}
                 <div className={cn(
-                  "p-3 rounded-2xl border",
+                  "flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 border",
                   isInterviewer
-                    ? "bg-white dark:bg-zinc-950/40 border-zinc-150 dark:border-zinc-850 rounded-tl-sm text-zinc-800 dark:text-zinc-250 shadow-sm"
-                    : "bg-indigo-600 dark:bg-indigo-500 border-none rounded-tr-sm text-white shadow-sm font-medium"
+                    ? "bg-indigo-50 border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400"
+                    : "bg-zinc-100 border-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:border-zinc-800 dark:text-zinc-400"
                 )}>
-                  {msg.text}
+                  {isInterviewer ? <HelpCircle className="h-4 w-4" /> : <User className="h-4 w-4" />}
                 </div>
-                <span className="text-[9px] text-zinc-400 dark:text-zinc-500 px-1 block">
-                  {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
+
+                {/* Message Bubble Container */}
+                <div className="space-y-1">
+                  <div className={cn(
+                    "p-3 rounded-2xl border",
+                    isInterviewer
+                      ? "bg-white dark:bg-zinc-950/40 border-zinc-100 dark:border-zinc-800 rounded-tl-sm text-zinc-800 dark:text-zinc-200 shadow-sm"
+                      : "bg-indigo-600 dark:bg-indigo-500 border-none rounded-tr-sm text-white shadow-sm font-medium"
+                  )}>
+                    {msg.text}
+                  </div>
+                  <span className="text-[9px] text-zinc-400 dark:text-zinc-550 px-1 block">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Interviewer Thinking State */}
+          {isInterviewerThinking && (
+            <div className="flex gap-3 max-w-[85%] text-xs mr-auto items-center">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400 flex-shrink-0">
+                <Loader2 className="h-4 w-4 animate-spin" />
+              </div>
+              <div className="p-3 bg-white dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 rounded-2xl rounded-tl-sm text-zinc-400 dark:text-zinc-550 shadow-sm flex items-center gap-1.5 font-medium italic">
+                AI Interviewer is analyzing response rubrics...
               </div>
             </div>
-          );
-        })}
-
-        {/* Interviewer Thinking State */}
-        {isInterviewerThinking && (
-          <div className="flex gap-3 max-w-[85%] text-xs mr-auto items-center">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400 flex-shrink-0">
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </div>
-            <div className="p-3 bg-white dark:bg-zinc-950/40 border border-zinc-150 dark:border-zinc-850 rounded-2xl rounded-tl-sm text-zinc-400 dark:text-zinc-550 shadow-sm flex items-center gap-1.5 font-medium italic">
-              AI Interviewer is analyzing response rubrics...
-            </div>
-          </div>
-        )}
-        <div ref={chatEndRef} />
-      </CardContent>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+      </ScrollArea>
 
       {/* Input controls footer */}
       <CardFooter className="p-4 border-t border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/30 flex flex-col gap-3 flex-shrink-0">
@@ -181,12 +184,13 @@ export function InterviewChat({
             size="icon"
             onClick={handleVoiceRecordToggle}
             className={cn(
-              "w-10 h-10 rounded-xl flex-shrink-0 transition-colors border",
+              "w-11 h-11 rounded-xl flex-shrink-0 transition-colors border",
               isRecording
                 ? "bg-red-500 border-red-500 text-white hover:bg-red-600"
                 : "border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             )}
             title={isRecording ? "Stop Recording" : "Record with Voice"}
+            aria-label={isRecording ? "Stop voice recording" : "Record answer with voice"}
           >
             {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </Button>
@@ -198,7 +202,8 @@ export function InterviewChat({
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
               disabled={isRecording}
-              className="min-h-[40px] max-h-[120px] py-2 px-3 pr-10 text-xs resize-none rounded-xl bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-indigo-500"
+              aria-label="Your answer"
+              className="min-h-[44px] max-h-[120px] py-2.5 px-3 pr-10 text-xs resize-none rounded-xl bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-indigo-500"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -213,7 +218,8 @@ export function InterviewChat({
             type="button"
             onClick={handleSend}
             disabled={!inputText.trim() || isRecording || isInterviewerThinking}
-            className="w-10 h-10 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-500/20 active:scale-95 transition-all flex-shrink-0"
+            aria-label="Send answer"
+            className="w-11 h-11 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-500/20 active:scale-95 transition-all flex-shrink-0"
           >
             <Send className="h-4 w-4" />
           </Button>
