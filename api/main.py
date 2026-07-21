@@ -1,5 +1,6 @@
 """FastAPI application exposing the LinkedIn job scraper."""
 import asyncio
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -10,8 +11,10 @@ from .models import JobCreatedResponse, JobRequest, JobStatusResponse
 from .scraper_worker import run_job
 from .store import JobStore
 
-SESSION_FILE = "linkedin_session.json"
-MAX_CONCURRENT_SCRAPES = 2
+# Path to the logged-in LinkedIn session file. Overridable so deployments can
+# point at a platform secret mount (e.g. Render's /etc/secrets/...).
+SESSION_FILE = os.environ.get("LINKEDIN_SESSION_FILE", "linkedin_session.json")
+MAX_CONCURRENT_SCRAPES = int(os.environ.get("MAX_CONCURRENT_SCRAPES", "2"))
 
 
 @asynccontextmanager

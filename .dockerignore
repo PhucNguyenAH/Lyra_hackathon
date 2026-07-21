@@ -1,0 +1,34 @@
+# Keep the backend image small and safe.
+
+# Frontend — deployed separately on Vercel, never needed in the backend image.
+front-end/
+
+# Secrets — must NEVER be baked into the image (provide at runtime instead).
+linkedin_session.json
+.env
+
+# VCS / tooling / scratch
+.git/
+.gitignore
+.superpowers/
+docs/
+
+# Tests and dev tooling
+tests/
+pytest.ini
+requirements-dev.txt
+
+# Unrelated heavy tooling (embedding/extractor) and its outputs
+extractor.py
+job_embeddings/
+resume_embeddings/
+resumes/
+
+# Python build/cache artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.pytest_cache/
