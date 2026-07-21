@@ -14,11 +14,25 @@ from .store import JobStore
 # Path to the logged-in LinkedIn session file. Overridable so deployments can
 # point at a platform secret mount (e.g. Render's /etc/secrets/...).
 SESSION_FILE = os.environ.get("LINKEDIN_SESSION_FILE", "linkedin_session.json")
+# On platforms without file mounts (e.g. Railway), the whole session JSON can be
+# supplied in this env var and is written to SESSION_FILE at startup.
+SESSION_JSON = os.environ.get("LINKEDIN_SESSION_JSON")
 MAX_CONCURRENT_SCRAPES = int(os.environ.get("MAX_CONCURRENT_SCRAPES", "2"))
+
+
+def _materialize_session_file() -> None:
+    """Write the session JSON from the env var to disk if no file exists yet."""
+    if SESSION_JSON and not os.path.exists(SESSION_FILE):
+        parent = os.path.dirname(SESSION_FILE)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(SESSION_FILE, "w") as fh:
+            fh.write(SESSION_JSON)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _materialize_session_file()
     browser = BrowserManager(headless=True)
     try:
         await browser.start()
