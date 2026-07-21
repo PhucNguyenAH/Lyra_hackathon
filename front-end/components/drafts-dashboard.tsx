@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,10 +61,24 @@ type EmailDecision = {
   company: string;
   role: string;
   subject: string;
+  body: string;
+  question: string;
   received: string;
-  detectedStatus: "Interview" | "Assessment" | "Rejected";
+  detectedStatus: "Interview" | "Offer" | "Rejected" | "Update";
   confidence: number;
   state: "pending" | "confirmed" | "dismissed";
+};
+
+type EmailNotificationResponse = {
+  id: string;
+  company: string;
+  role: string;
+  subject: string;
+  body: string;
+  received_at: string | null;
+  intent: "interview_invite" | "rejection" | "offer" | "ack" | "unrelated";
+  confidence: number;
+  question: string;
 };
 
 interface DraftsDashboardProps {
@@ -73,18 +87,18 @@ interface DraftsDashboardProps {
   onTailorCV: (jobId: string, source: { draftId?: string; file?: File }) => void;
 }
 
-const initialEmailDecisions: EmailDecision[] = [
-  { id: "mail-1", company: "InnovateTech Solutions", role: "Backend Engineer", subject: "Invitation to technical interview", received: "12 min ago", detectedStatus: "Interview", confidence: 98, state: "pending" },
-  { id: "mail-2", company: "Vercel Partner Studio", role: "Senior Frontend Architect", subject: "Next step: take-home assessment", received: "2 hr ago", detectedStatus: "Assessment", confidence: 94, state: "pending" },
-  { id: "mail-3", company: "Northstar Cloud", role: "Platform Engineer", subject: "Update on your application", received: "Yesterday", detectedStatus: "Rejected", confidence: 87, state: "pending" },
-];
+const EMAIL_API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8008").replace(/\/$/, "");
+const EMAIL_POLL_INTERVAL_MS = 15_000;
 
 export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardProps) {
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [jobSearch, setJobSearch] = useState("");
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
-  const [emailDecisions, setEmailDecisions] = useState(initialEmailDecisions);
+  const [emailDecisions, setEmailDecisions] = useState<EmailDecision[]>([]);
+  const [emailLoading, setEmailLoading] = useState(true);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailActionId, setEmailActionId] = useState<string | null>(null);
   const [reviewEmailId, setReviewEmailId] = useState<string | null>(null);
   const [setupMode, setSetupMode] = useState<"pdf" | "manual">("pdf");
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -112,7 +126,55 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   const pendingCount = emailDecisions.filter((decision) => decision.state === "pending").length;
   const tailorJob = jobs.find((job) => job.id === tailorJobId);
   const updateProfile = (field: keyof typeof profile, value: string) => setProfile((current) => ({ ...current, [field]: value }));
-  const updateDecision = (id: string, state: EmailDecision["state"]) => setEmailDecisions((current) => current.map((decision) => decision.id === id ? { ...decision, state } : decision));
+  const updateDecision = async (id: string, state: "confirmed" | "dismissed") => {
+    setEmailActionId(id);
+    setEmailError(null);
+    try {
+      const action = state === "confirmed" ? "confirm" : "dismiss";
+      const response = await fetch(`${EMAIL_API_URL}/email-services/needs-attention/${id}/${action}`, { method: "POST" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(payload?.detail || "Could not update this email decision");
+      }
+      setEmailDecisions((current) => current.map((decision) => decision.id === id ? { ...decision, state } : decision));
+    } catch (error) {
+      setEmailError(error instanceof Error ? error.message : "Could not update this email decision");
+    } finally {
+      setEmailActionId(null);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch(`${EMAIL_API_URL}/email-services/notifications`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Email notifications are temporarily unavailable");
+        const notifications = await response.json() as EmailNotificationResponse[];
+        if (!active) return;
+        setEmailDecisions(notifications.map((notification) => ({
+          id: notification.id,
+          company: notification.company,
+          role: notification.role,
+          subject: notification.subject,
+          body: notification.body,
+          question: notification.question,
+          received: formatReceivedAt(notification.received_at),
+          detectedStatus: intentStatus(notification.intent),
+          confidence: Math.round(notification.confidence * 100),
+          state: "pending",
+        })));
+        setEmailError(null);
+      } catch (error) {
+        if (active) setEmailError(error instanceof Error ? error.message : "Email notifications are temporarily unavailable");
+      } finally {
+        if (active) setEmailLoading(false);
+      }
+    };
+    void loadNotifications();
+    const poll = window.setInterval(() => void loadNotifications(), EMAIL_POLL_INTERVAL_MS);
+    return () => { active = false; window.clearInterval(poll); };
+  }, []);
   const handleCVUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -275,15 +337,18 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
         </Card>
 
         <Card className="h-fit gap-0 overflow-hidden py-0 shadow-sm">
-          <CardHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"><CardTitle className="flex items-center justify-between text-base"><span className="flex items-center gap-2"><Mail className="h-4 w-4 text-indigo-600" />Email decisions</span><Badge variant="secondary">{pendingCount} pending</Badge></CardTitle><p className="mt-1 text-xs text-zinc-500">Athena detected these updates. Nothing changes until you confirm.</p></CardHeader>
+          <CardHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"><CardTitle className="flex items-center justify-between text-base"><span className="flex items-center gap-2"><Mail className="h-4 w-4 text-indigo-600" />Email decisions</span><Badge variant="secondary">{pendingCount} pending</Badge></CardTitle><p className="mt-1 text-xs text-zinc-500">Uncertain inbox updates wait here for your decision.</p></CardHeader>
           <CardContent className="space-y-3 p-3">
+            {emailLoading && <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500"><LoaderCircle className="h-4 w-4 animate-spin" />Checking your inbox decisions…</div>}
+            {!emailLoading && emailError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-400">{emailError}</div>}
+            {!emailLoading && !emailError && emailDecisions.length === 0 && <div className="py-8 text-center"><Check className="mx-auto h-5 w-5 text-emerald-600" /><p className="mt-2 text-sm font-semibold">No decisions waiting</p><p className="mt-1 text-xs text-zinc-500">New uncertain application emails will appear here.</p></div>}
             {emailDecisions.filter((decision) => decision.state !== "dismissed").map((decision) => (
               <article key={decision.id} className={cn("rounded-xl border p-4", decision.state === "confirmed" ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-900 dark:bg-emerald-950/20" : "border-zinc-200 dark:border-zinc-800")}>
                 <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{decision.company}</p><p className="truncate text-xs text-zinc-500">{decision.role}</p></div><StatusBadge status={decision.detectedStatus} /></div>
                 <p className="mt-3 text-xs font-medium text-zinc-700 dark:text-zinc-300">“{decision.subject}”</p>
                 <p className="mt-1 flex items-center gap-1 text-[11px] text-zinc-400"><Clock3 className="h-3 w-3" />{decision.received} · {decision.confidence}% detection confidence</p>
-                {reviewEmailId === decision.id && <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"><p className="font-semibold text-zinc-900 dark:text-zinc-100">Email preview</p><p className="mt-1">Hi Kian, thank you for your application for the {decision.role} position. {decision.detectedStatus === "Interview" ? "We would like to invite you to the next interview stage." : decision.detectedStatus === "Assessment" ? "Please complete the attached assessment as the next step." : "We have decided not to progress your application at this time."}</p></div>}
-                {decision.state === "pending" ? <div className="mt-3 grid grid-cols-3 gap-2"><Button size="sm" onClick={() => updateDecision(decision.id, "confirmed")} className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-700"><Check className="mr-1 h-3.5 w-3.5" />Confirm</Button><Button size="sm" variant="outline" onClick={() => setReviewEmailId((current) => current === decision.id ? null : decision.id)} className="h-8 text-xs"><FileSearch className="mr-1 h-3.5 w-3.5" />Review</Button><Button size="sm" variant="ghost" onClick={() => updateDecision(decision.id, "dismissed")} className="h-8 text-xs text-zinc-500"><X className="mr-1 h-3.5 w-3.5" />Dismiss</Button></div> : <div className="mt-3 flex items-center justify-between text-xs font-medium text-emerald-700 dark:text-emerald-400"><span className="flex items-center gap-1"><Check className="h-3.5 w-3.5" />Application updated</span><button type="button" onClick={() => updateDecision(decision.id, "pending")} className="text-zinc-500 hover:text-zinc-900"><Pencil className="mr-1 inline h-3 w-3" />Undo</button></div>}
+                {reviewEmailId === decision.id && <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 text-xs leading-relaxed text-zinc-600 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"><p className="font-semibold text-zinc-900 dark:text-zinc-100">Why this needs review</p><p className="mt-1">{decision.question}</p><p className="mt-3 font-semibold text-zinc-900 dark:text-zinc-100">Email preview</p><p className="mt-1 whitespace-pre-wrap">{decision.body || "No email body was stored."}</p></div>}
+                {decision.state === "pending" ? <div className="mt-3 grid grid-cols-3 gap-2"><Button size="sm" disabled={emailActionId === decision.id} onClick={() => void updateDecision(decision.id, "confirmed")} className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-700">{emailActionId === decision.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <><Check className="mr-1 h-3.5 w-3.5" />Confirm</>}</Button><Button size="sm" variant="outline" onClick={() => setReviewEmailId((current) => current === decision.id ? null : decision.id)} className="h-8 text-xs"><FileSearch className="mr-1 h-3.5 w-3.5" />Review</Button><Button size="sm" variant="ghost" disabled={emailActionId === decision.id} onClick={() => void updateDecision(decision.id, "dismissed")} className="h-8 text-xs text-zinc-500"><X className="mr-1 h-3.5 w-3.5" />Dismiss</Button></div> : <div className="mt-3 flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400"><Check className="h-3.5 w-3.5" />Application updated</div>}
               </article>
             ))}
           </CardContent>
@@ -301,6 +366,25 @@ function MatchBadge({ score }: { score: number }) {
   return <Badge className={cn("shrink-0 border px-2 py-1 text-[10px] font-bold shadow-none", score >= 85 ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400" : score >= 70 ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-400" : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400")}>{score}% match</Badge>;
 }
 
+function intentStatus(intent: EmailNotificationResponse["intent"]): EmailDecision["detectedStatus"] {
+  if (intent === "interview_invite") return "Interview";
+  if (intent === "offer") return "Offer";
+  if (intent === "rejection") return "Rejected";
+  return "Update";
+}
+
+function formatReceivedAt(receivedAt: string | null): string {
+  if (!receivedAt) return "Recently";
+  const received = new Date(receivedAt);
+  if (Number.isNaN(received.getTime())) return "Recently";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - received.getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "Just now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} hr ago`;
+  return received.toLocaleDateString();
+}
+
 function StatusBadge({ status }: { status: EmailDecision["detectedStatus"] }) {
-  return <Badge className={cn("shrink-0 border px-2 py-0.5 text-[9px] shadow-none", status === "Interview" && "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-400", status === "Assessment" && "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400", status === "Rejected" && "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-400")}>{status}</Badge>;
+  return <Badge className={cn("shrink-0 border px-2 py-0.5 text-[9px] shadow-none", status === "Interview" && "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-400", status === "Offer" && "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400", status === "Rejected" && "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-400", status === "Update" && "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400")}>{status}</Badge>;
 }
