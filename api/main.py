@@ -17,8 +17,12 @@ MAX_CONCURRENT_SCRAPES = 2
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     browser = BrowserManager(headless=True)
-    await browser.start()
-    await browser.load_session(SESSION_FILE)
+    try:
+        await browser.start()
+        await browser.load_session(SESSION_FILE)
+    except Exception:
+        await browser.close()
+        raise
     app.state.browser = browser
     app.state.store = JobStore()
     app.state.semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCRAPES)

@@ -10,8 +10,10 @@ FastAPI service wrapping the `linkedin_scraper` package.
 ## Run
 
 ```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000
+uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
+
+Binds to localhost only — the API has no authentication and drives a logged-in LinkedIn session, so it must not be exposed on the network.
 
 Single process only — do NOT pass `--workers >1` (the job store is in-memory).
 
