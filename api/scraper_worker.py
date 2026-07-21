@@ -13,8 +13,9 @@ async def run_job(job_id, title, location, *, store, browser, semaphore) -> None
     """Run a single scrape job and record its outcome in the store."""
     async with semaphore:
         store.set(job_id, status="running")
-        page = await browser.new_page()
+        page = None
         try:
+            page = await browser.new_page()
             urls = await JobSearchScraper(page).search(
                 keywords=title, location=location, limit=1
             )
@@ -27,4 +28,8 @@ async def run_job(job_id, title, location, *, store, browser, semaphore) -> None
             logger.exception("Job %s failed", job_id)
             store.set(job_id, status="error", error=str(exc))
         finally:
-            await page.close()
+            if page is not None:
+                try:
+                    await page.close()
+                except Exception:
+                    logger.exception("Failed to close page for job %s", job_id)
