@@ -24,7 +24,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { HelpCircle, Star, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, AlertCircle, RefreshCw, Timer, ClipboardList } from "lucide-react";
+import { HelpCircle, Star, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, AlertCircle, RefreshCw, Timer, ClipboardList, BookOpen, Building2, Network, Shuffle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CVDraft } from "../drafts-dashboard";
 import { CVData } from "../cv-editor/cv-pdf-preview";
@@ -58,6 +58,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
   // Choose between General vs. Job & CV Tailored
   const [interviewMode, setInterviewMode] = useState<"tailored" | "general">("tailored");
   const [generalTrack, setGeneralTrack] = useState<"SWE" | "AI">("SWE");
+  const [questionFocus, setQuestionFocus] = useState<"general" | "domain" | "system-design" | "mixed">("general");
 
   // Selected configuration references
   const [selectedDraftId, setSelectedDraftId] = useState(drafts[0]?.id || "");
@@ -161,7 +162,17 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
 
     let initialText = "";
 
-    if (interviewMode === "general") {
+    if (questionFocus === "mixed") {
+      initialText = `This will be a mixed interview covering technical fundamentals, ${interviewMode === "tailored" ? `${activeJob.company}'s domain, ` : "product-domain thinking, "}and system design. Let's begin with a general knowledge question: ${generalTrack === "AI" ? "How would you evaluate the quality of a retrieval-augmented generation system?" : "How do you decide between synchronous and asynchronous processing in a production application?"}`;
+    } else if (questionFocus === "system-design") {
+      initialText = interviewMode === "tailored"
+        ? `You are designing a production system for ${activeJob.company}. Walk me through the architecture, data flow, scaling assumptions, failure modes, and trade-offs you would consider for a platform used by this ${activeJob.title} team.`
+        : `Design a production-grade ${generalTrack === "AI" ? "retrieval-augmented AI platform" : "high-traffic collaboration platform"}. Start with requirements, then explain your architecture, data model, scaling strategy, failure handling, and trade-offs.`;
+    } else if (questionFocus === "domain") {
+      initialText = interviewMode === "tailored"
+        ? `What do you understand about ${activeJob.company}'s domain, users, and likely technical constraints? For the ${activeJob.title} role, identify one important product or engineering problem and explain how you would approach it.`
+        : `Choose a company or product domain you know well. Explain its users, business model, technical constraints, and one engineering decision that is especially important in that domain.`;
+    } else if (interviewMode === "general") {
       if (generalTrack === "AI") {
         initialText = "Hello! Welcome to your technical mock interview preparation session for general AI Engineering. We will evaluate your knowledge in AI agents, LangChain loops, and vector database indexing. Can you start by explaining how you design retrieval-augmented generation (RAG) pipelines and handle chunking?";
       } else {
@@ -242,7 +253,16 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
 
       const nextTopic = topics[activeTopicIdx + 1];
       if (nextTopic) {
-        const nextQuestion = getNextQuestion(nextTopic.id);
+        const mixedStage = (activeTopicIdx + 1) % 3;
+        const nextQuestion = questionFocus === "mixed" && mixedStage === 1
+          ? `For ${interviewMode === "tailored" ? activeJob.company : "a product company"}, what domain constraints and user needs would most influence your engineering decisions?`
+          : questionFocus === "mixed" && mixedStage === 2
+            ? `Design a scalable system for this domain. Explain the requirements, architecture, data model, failure modes, and the main trade-off you would make.`
+            : questionFocus === "domain"
+              ? `How would ${interviewMode === "tailored" ? activeJob.company : "a company in this domain"} balance user needs, business constraints, and technical risk for ${nextTopic.name}?`
+              : questionFocus === "system-design"
+                ? `Design the ${nextTopic.name} part of a production platform. Cover scale, reliability, data flow, and trade-offs.`
+                : getNextQuestion(nextTopic.id);
         const interviewerMsg: Message = {
           id: `msg-int-${Date.now()}`,
           sender: "interviewer",
@@ -378,6 +398,10 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
               <span className="font-semibold text-zinc-500">Mode:</span>
               <span className="font-bold text-zinc-800 capitalize">{interviewMode} Track</span>
             </div>
+            <div className="flex justify-between gap-4">
+              <span className="font-semibold text-zinc-500">Question focus:</span>
+              <span className="text-right font-bold text-zinc-800">{questionFocus === "general" ? "General knowledge" : questionFocus === "domain" ? "Company & domain" : questionFocus === "system-design" ? "System design" : "Mixed interview"}</span>
+            </div>
             
             {interviewMode === "general" ? (
               <div className="flex justify-between">
@@ -471,6 +495,22 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
                   >
                     <span className="block text-sm font-bold">General practice</span><span className="mt-1 block text-xs font-normal leading-relaxed text-zinc-500">Build confidence with common engineering questions.</span>
                   </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div><label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Question focus</label><p className="mt-0.5 text-[11px] text-zinc-500">Choose what the interviewer should test most deeply.</p></div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {([
+                    { id: "general", label: "General knowledge", description: "Core concepts and technical fundamentals.", icon: BookOpen },
+                    { id: "domain", label: "Company & domain", description: "Users, product context, and business constraints.", icon: Building2 },
+                    { id: "system-design", label: "System design", description: "Architecture, scale, reliability, and trade-offs.", icon: Network },
+                    { id: "mixed", label: "Mixed interview", description: "Rotate through all three question types.", icon: Shuffle },
+                  ] as const).map((focus) => {
+                    const Icon = focus.icon;
+                    const selected = questionFocus === focus.id;
+                    return <button key={focus.id} type="button" onClick={() => setQuestionFocus(focus.id)} className={cn("rounded-xl border p-3 text-left transition-colors", selected ? "border-indigo-500 bg-indigo-50/60 ring-1 ring-indigo-500 dark:bg-indigo-950/20" : "border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/40")}><div className="flex items-center gap-2"><Icon className={cn("h-4 w-4", selected ? "text-indigo-600" : "text-zinc-400")} /><span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{focus.label}</span></div><p className="mt-1.5 text-[10px] leading-relaxed text-zinc-500">{focus.description}</p></button>;
+                  })}
                 </div>
               </div>
 
