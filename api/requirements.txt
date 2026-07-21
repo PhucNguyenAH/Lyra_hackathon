@@ -1,0 +1,10 @@
+# Runtime dependencies for the job-scraping API service ONLY.
+# Deliberately minimal — the scraper + API import just these. The heavier deps
+# in the repo-root requirements.txt (vllm, numpy, sqlalchemy, psycopg2, py2neo,
+# pypdf) belong to the embedding/extractor tooling and are NOT needed to serve
+# the API, so they are excluded here to keep the deploy image small.
+fastapi==0.136.0
+uvicorn[standard]==0.46.0
+playwright==1.61.0
+pydantic==2.13.4
+python-dotenv==1.2.2
