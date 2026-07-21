@@ -9,7 +9,7 @@ import pytest
 
 from email_services.classifier import classify
 from email_services.matcher import match_application
-from email_services.schemas import EmailIntent
+from email_services.schemas import ClassifiedEmail, EmailIntent
 from email_services.transitions import decide
 
 
@@ -68,6 +68,21 @@ def run_evaluation() -> tuple[float, list[str]]:
     print(f"Intent accuracy: {intent_accuracy:.1%}")
     print(f"False auto-updates: {len(false_auto_updates)}")
     return intent_accuracy, false_auto_updates
+
+
+def test_null_proposed_times_are_normalized() -> None:
+    """Keep a harmless model null from aborting the entire inbox polling iteration."""
+    classified = ClassifiedEmail.model_validate(
+        {
+            "intent": "interview_invite",
+            "company_guess": "Canva",
+            "role_guess": "Frontend Engineer",
+            "proposed_times": None,
+            "confidence": 0.9,
+        }
+    )
+
+    assert classified.proposed_times == []
 
 
 @pytest.mark.integration

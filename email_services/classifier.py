@@ -33,6 +33,7 @@ Intent rules:
 Extraction rules:
 - company_guess and role_guess must come from the email. Use null when not supported.
 - proposed_times contains only interview times or scheduling windows explicitly stated.
+  Always return an array for this field. Return [] when the email proposes no times.
 - confidence measures certainty in the intent, from 0.0 to 1.0. Use lower confidence for
   vague language, forwarded fragments, ambiguous company identity, or missing context.
 - Do not infer that an application exists. Matching to tracked applications happens later.

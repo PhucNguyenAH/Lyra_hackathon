@@ -2,7 +2,9 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class EmailIntent(str, Enum):
@@ -23,3 +25,13 @@ class ClassifiedEmail(BaseModel):
     role_guess: str | None = None
     proposed_times: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
+
+    @field_validator(
+        "proposed_times",
+        mode="before",
+        json_schema_input_type=list[str] | None,
+    )
+    @classmethod
+    def normalize_missing_times(cls, value: Any) -> Any:
+        """Treat a model's null as no proposed times instead of losing the email."""
+        return [] if value is None else value
