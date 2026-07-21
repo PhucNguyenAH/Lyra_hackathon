@@ -35,6 +35,12 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "aiofiles>=23.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "groq>=0.13.0",
+    "instructor>=1.7.0",
+    "rapidfuzz>=3.10.0",
+    "supabase>=2.10.0",
 ]
 
 [project.optional-dependencies]

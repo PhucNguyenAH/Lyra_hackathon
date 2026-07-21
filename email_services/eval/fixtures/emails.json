@@ -1,0 +1,157 @@
+[
+  {
+    "id": "interview-atlassian",
+    "email": {
+      "from": "Maya Chen <maya@atlassian.com>",
+      "subject": "Interview invitation — Graduate Software Engineer",
+      "body": "Hi Kian, thank you for applying for the Graduate Software Engineer role at Atlassian. We would like to invite you to a 30-minute technical interview. Are you available Tuesday 28 July at 10:00 AM AEST or Wednesday 29 July at 2:30 PM AEST?"
+    },
+    "applications": [
+      {"id": "app-atlassian", "company": "Atlassian", "role": "Graduate Software Engineer", "status": "applied"}
+    ],
+    "expected_intent": "interview_invite",
+    "expected_auto": true
+  },
+  {
+    "id": "interview-canva",
+    "email": {
+      "from": "Canva Talent <talent@canva.com>",
+      "subject": "Next step for your Frontend Engineer application",
+      "body": "We enjoyed reviewing your application for Frontend Engineer at Canva and would like to move you to the interview stage. Please choose a screening time through the scheduling link by Friday."
+    },
+    "applications": [
+      {"id": "app-canva", "company": "Canva", "role": "Frontend Engineer", "status": "applied"}
+    ],
+    "expected_intent": "interview_invite",
+    "expected_auto": true
+  },
+  {
+    "id": "interview-vercel",
+    "email": {
+      "from": "Jordan Lee <jordan@vercel.com>",
+      "subject": "Technical interview — Software Engineer, Developer Experience",
+      "body": "Hello Kian, Vercel would like to invite you to the technical interview for the Software Engineer, Developer Experience position. The available window is 3–5 August, between 9 AM and 1 PM Sydney time."
+    },
+    "applications": [
+      {"id": "app-vercel", "company": "Vercel", "role": "Software Engineer, Developer Experience", "status": "applied"}
+    ],
+    "expected_intent": "interview_invite",
+    "expected_auto": true
+  },
+  {
+    "id": "rejection-stripe",
+    "email": {
+      "from": "Stripe Recruiting <recruiting@stripe.com>",
+      "subject": "Update on your Software Engineer application",
+      "body": "Thank you for your interest in Stripe. After reviewing your application for Software Engineer, we have decided not to move forward with your application at this time."
+    },
+    "applications": [
+      {"id": "app-stripe", "company": "Stripe", "role": "Software Engineer", "status": "applied"}
+    ],
+    "expected_intent": "rejection",
+    "expected_auto": true
+  },
+  {
+    "id": "rejection-airwallex",
+    "email": {
+      "from": "Airwallex People Team <careers@airwallex.com>",
+      "subject": "Your Backend Engineer interview process",
+      "body": "Hi Kian, we appreciate the time you spent interviewing with Airwallex for the Backend Engineer role. We will not be progressing your candidacy to the next round."
+    },
+    "applications": [
+      {"id": "app-airwallex", "company": "Airwallex", "role": "Backend Engineer", "status": "interview"}
+    ],
+    "expected_intent": "rejection",
+    "expected_auto": true
+  },
+  {
+    "id": "rejection-microsoft-low-match",
+    "email": {
+      "from": "Hiring Team <notifications@careers.microsoft.com>",
+      "subject": "Application status update",
+      "body": "We have completed our review and will not be moving ahead with your candidacy. Thank you for considering Microsoft."
+    },
+    "applications": [
+      {"id": "app-microstrategy", "company": "MicroStrategy", "role": "Cloud Engineer", "status": "applied"}
+    ],
+    "expected_intent": "rejection",
+    "expected_auto": false
+  },
+  {
+    "id": "offer-safetyculture",
+    "email": {
+      "from": "Priya Shah <priya@safetyculture.com>",
+      "subject": "Offer — Software Engineer at SafetyCulture",
+      "body": "Congratulations Kian. We are pleased to formally offer you the Software Engineer position at SafetyCulture. The proposed start date is 17 August 2026. Your offer letter is attached for review."
+    },
+    "applications": [
+      {"id": "app-safetyculture", "company": "SafetyCulture", "role": "Software Engineer", "status": "interview"}
+    ],
+    "expected_intent": "offer",
+    "expected_auto": true
+  },
+  {
+    "id": "ack-google",
+    "email": {
+      "from": "Google Careers <noreply@google.com>",
+      "subject": "We received your application",
+      "body": "Thank you for applying to the Software Engineer, Early Career role at Google. Your application was submitted successfully and is now under review."
+    },
+    "applications": [
+      {"id": "app-google", "company": "Google", "role": "Software Engineer, Early Career", "status": "applied"}
+    ],
+    "expected_intent": "ack",
+    "expected_auto": false
+  },
+  {
+    "id": "ack-amazon",
+    "email": {
+      "from": "Amazon Jobs <application@amazon.jobs>",
+      "subject": "Application confirmation: Systems Development Engineer",
+      "body": "This email confirms that Amazon received your application for Systems Development Engineer. No action is required. We will contact you if your qualifications match our needs."
+    },
+    "applications": [
+      {"id": "app-amazon", "company": "Amazon", "role": "Systems Development Engineer", "status": "applied"}
+    ],
+    "expected_intent": "ack",
+    "expected_auto": false
+  },
+  {
+    "id": "unrelated-newsletter",
+    "email": {
+      "from": "Frontend Weekly <hello@frontendweekly.dev>",
+      "subject": "React Server Components, browser APIs, and 12 new jobs",
+      "body": "This week: React performance techniques, a CSS animation tutorial, community news, and sponsored engineering vacancies. Manage your newsletter preferences here."
+    },
+    "applications": [],
+    "expected_intent": "unrelated",
+    "expected_auto": false
+  },
+  {
+    "id": "unrelated-recruiter-cold-outreach",
+    "email": {
+      "from": "Alex Morgan <alex@talentsearch.example>",
+      "subject": "Open to a Senior React opportunity at Canva?",
+      "body": "Hi Kian, I found your profile online and wondered whether you might be open to a Senior React contract with Canva. You have not applied yet. Let me know if you want the job description."
+    },
+    "applications": [
+      {"id": "app-canva-existing", "company": "Canva", "role": "Frontend Engineer", "status": "applied"}
+    ],
+    "expected_intent": "unrelated",
+    "expected_auto": false
+  },
+  {
+    "id": "edge-ambiguous-company-invite",
+    "email": {
+      "from": "Sam <sam@ac-group.example>",
+      "subject": "Interview availability",
+      "body": "Thanks for your application. The AC team would like to arrange an interview next week for the engineering role. Can you send through a few times that work?"
+    },
+    "applications": [
+      {"id": "app-acme", "company": "ACME Technologies", "role": "Software Engineer", "status": "applied"},
+      {"id": "app-arc", "company": "Arc Consulting", "role": "Platform Engineer", "status": "applied"}
+    ],
+    "expected_intent": "interview_invite",
+    "expected_auto": false
+  }
+]
