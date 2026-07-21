@@ -34,4 +34,8 @@ EXPOSE 8000
 
 # Single process only: the job store is in-memory, so it must NOT be split
 # across multiple uvicorn workers. Bind 0.0.0.0 so the platform can route to it.
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+#
+# Bind $PORT when the platform injects one (Railway, Cloud Run, Heroku), else
+# default to 8000 (local `docker run`). `exec` keeps uvicorn as PID 1 so it
+# receives SIGTERM and shuts the browser down cleanly.
+CMD ["/bin/sh", "-c", "exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

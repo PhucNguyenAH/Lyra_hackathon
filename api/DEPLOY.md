@@ -55,16 +55,36 @@ anywhere that accepts a Dockerfile.
      contents of your local `linkedin_session.json`. Render mounts it at
      `/etc/secrets/linkedin_session.json`.
    - Environment → add var `LINKEDIN_SESSION_FILE = /etc/secrets/linkedin_session.json`.
-5. Deploy. Render builds the image and runs the `CMD`
-   (`uvicorn api.main:app --host 0.0.0.0 --port 8000`); it maps its public
-   `$PORT` to the container. If your platform injects a `$PORT`, override the
-   start command to `uvicorn api.main:app --host 0.0.0.0 --port $PORT`.
+5. Deploy. Render builds the image and runs the `CMD`. The container binds
+   `$PORT` when the platform injects one, else `8000` — no start-command
+   override needed.
 6. Verify: open `https://<your-service>.onrender.com/docs`, or:
    ```bash
    curl -X POST https://<your-service>.onrender.com/jobs \
      -H "Content-Type: application/json" \
      -d '{"title":"AI Engineer","location":"Sydney"}'
    ```
+
+## Deploy on Railway (Docker)
+
+Railway defaults to its own Python auto-builder (Railpack), which does **not**
+install Chromium and won't know how to start the app — that's the "No start
+command detected" error. This repo ships a `railway.json` that forces Railway
+to build from the `Dockerfile` instead, so no start command is needed.
+
+1. **The `Dockerfile` and `railway.json` must be on the branch Railway deploys.**
+   If your first deploy showed "Detected Python / Using pip", Railway built a
+   commit that predated them — push, then redeploy.
+2. Railway → **New Project → Deploy from GitHub repo** → pick this repo and the
+   branch. Ensure the service **Root Directory** is the repo root (not
+   `front-end/`), so `Dockerfile`/`railway.json` are visible.
+3. `railway.json` already pins `builder: DOCKERFILE` and `numReplicas: 1`
+   (single instance — required by the in-memory store).
+4. **Session secret:** Variables → add `linkedin_session.json` as a file/volume,
+   or add the JSON as a variable and write it out on boot; then set
+   `LINKEDIN_SESSION_FILE` to wherever it lands. Railway also injects `$PORT`,
+   which the container binds automatically.
+5. Deploy and verify at `https://<your-service>.up.railway.app/docs`.
 
 ## Build & run the image locally (optional sanity check)
 
