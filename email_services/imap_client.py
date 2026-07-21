@@ -6,6 +6,7 @@ import re
 from email import message_from_bytes, policy
 from email.header import decode_header
 from email.message import Message
+from email.utils import parsedate_to_datetime
 from typing import TypeAlias
 
 
@@ -15,6 +16,8 @@ FETCH_QUERY = "(BODY.PEEK[])"
 HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 MAILBOX_NAME = "INBOX"
 SEARCH_CRITERION = "UNSEEN"
+SEEN_FLAG = "\\Seen"
+STORE_ACTION = "+FLAGS.SILENT"
 
 EmailData: TypeAlias = dict[str, str]
 
@@ -66,6 +69,29 @@ def _extract_body(message: Message) -> str:
     return " ".join(body.split())[:BODY_CHAR_LIMIT]
 
 
+def _received_at(message: Message) -> str:
+    """Normalize email dates so Supabase receives an unambiguous timestamp."""
+    raw_date = message.get("Date")
+    if not raw_date:
+        return ""
+    try:
+        return parsedate_to_datetime(raw_date).isoformat()
+    except (TypeError, ValueError, OverflowError):
+        return ""
+
+
+def _close_client(client: imaplib.IMAP4_SSL) -> None:
+    """Avoid masking the original mailbox error during connection cleanup."""
+    try:
+        client.close()
+    except imaplib.IMAP4.error:
+        pass
+    try:
+        client.logout()
+    except imaplib.IMAP4.error:
+        pass
+
+
 def fetch_unseen(host: str, user: str, pwd: str) -> list[EmailData]:
     """Read unseen mail with PEEK so a failed watcher run can safely retry it."""
     client = imaplib.IMAP4_SSL(host)
@@ -77,13 +103,13 @@ def fetch_unseen(host: str, user: str, pwd: str) -> list[EmailData]:
         if status != "OK":
             raise RuntimeError(f"Unable to select IMAP mailbox: {status}")
 
-        status, search_data = client.search(None, SEARCH_CRITERION)
+        status, search_data = client.uid("search", None, SEARCH_CRITERION)
         if status != "OK":
             raise RuntimeError(f"Unable to search IMAP mailbox: {status}")
 
-        message_ids = search_data[0].split() if search_data and search_data[0] else []
-        for message_id in message_ids:
-            status, fetched_data = client.fetch(message_id, FETCH_QUERY)
+        message_uids = search_data[0].split() if search_data and search_data[0] else []
+        for message_uid in message_uids:
+            status, fetched_data = client.uid("fetch", message_uid, FETCH_QUERY)
             if status != "OK":
                 continue
 
@@ -100,16 +126,28 @@ def fetch_unseen(host: str, user: str, pwd: str) -> list[EmailData]:
                     "from": _decode_header(parsed.get("From")),
                     "subject": _decode_header(parsed.get("Subject")),
                     "body": _extract_body(parsed),
+                    "imap_uid": message_uid.decode(DEFAULT_CHARSET),
+                    "message_id": _decode_header(parsed.get("Message-ID")),
+                    "received_at": _received_at(parsed),
                 }
             )
 
         return messages
     finally:
-        try:
-            client.close()
-        except imaplib.IMAP4.error:
-            pass
-        try:
-            client.logout()
-        except imaplib.IMAP4.error:
-            pass
+        _close_client(client)
+
+
+def mark_seen(host: str, user: str, pwd: str, message_uid: str) -> None:
+    """Acknowledge mail only after persistence succeeds to preserve retry safety."""
+    client = imaplib.IMAP4_SSL(host)
+    try:
+        client.login(user, pwd)
+        status, _ = client.select(MAILBOX_NAME, readonly=False)
+        if status != "OK":
+            raise RuntimeError(f"Unable to select IMAP mailbox: {status}")
+
+        status, _ = client.uid("store", message_uid, STORE_ACTION, SEEN_FLAG)
+        if status != "OK":
+            raise RuntimeError(f"Unable to mark IMAP message as seen: {status}")
+    finally:
+        _close_client(client)
