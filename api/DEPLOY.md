@@ -80,11 +80,21 @@ to build from the `Dockerfile` instead, so no start command is needed.
    `front-end/`), so `Dockerfile`/`railway.json` are visible.
 3. `railway.json` already pins `builder: DOCKERFILE` and `numReplicas: 1`
    (single instance — required by the in-memory store).
-4. **Session secret:** Variables → add `linkedin_session.json` as a file/volume,
-   or add the JSON as a variable and write it out on boot; then set
-   `LINKEDIN_SESSION_FILE` to wherever it lands. Railway also injects `$PORT`,
-   which the container binds automatically.
-5. Deploy and verify at `https://<your-service>.up.railway.app/docs`.
+4. **Session secret (Railway has no file mount — use an env var):** the app
+   writes the session to disk on boot from `LINKEDIN_SESSION_JSON` if the file
+   is absent. Service → **Variables** → add:
+   - `LINKEDIN_SESSION_JSON` = the *entire contents* of your local
+     `linkedin_session.json` (run `cat linkedin_session.json` and paste it;
+     use Railway's raw/multi-line editor).
+
+   Leave `LINKEDIN_SESSION_FILE` at its default (`linkedin_session.json`) unless
+   you have a reason to change it. Railway injects `$PORT`, which the container
+   binds automatically.
+5. Redeploy and verify at `https://<your-service>.up.railway.app/docs`.
+
+   > If you'd rather use a persistent Volume: mount it (e.g. at `/data`), set
+   > `LINKEDIN_SESSION_FILE=/data/linkedin_session.json`, and put the file there
+   > once. The env-var route above is simpler for a first deploy.
 
 ## Build & run the image locally (optional sanity check)
 
