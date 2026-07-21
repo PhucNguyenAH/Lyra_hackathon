@@ -25,7 +25,6 @@ from interview.turn import analyze
 SESSIONS_TABLE = "interview_sessions"
 REPORTS_TABLE = "interview_reports"
 USERS_TABLE = "users"
-RECENT_SESSION_SCAN_LIMIT = 10
 
 
 class SessionNotFoundError(LookupError):
@@ -52,30 +51,19 @@ def _load_cv_text(db: Client, user_id: str) -> str:
 
 
 def _load_recent_weak_topics(db: Client, user_id: str) -> list[WeakTopic]:
-    """Find the newest completed report through the user id stored in session config."""
-    session_response = (
-        db.table(SESSIONS_TABLE)
-        .select("id,config,created_at")
-        .contains("config", {"user_id": user_id})
+    """Load one user's latest report through the indexed relational user id."""
+    report_response = (
+        db.table(REPORTS_TABLE)
+        .select("report,created_at,interview_sessions!inner(user_id)")
+        .eq("interview_sessions.user_id", user_id)
         .order("created_at", desc=True)
-        .limit(RECENT_SESSION_SCAN_LIMIT)
+        .limit(1)
         .execute()
     )
-    sessions = session_response.data if isinstance(session_response.data, list) else []
-    for raw_session in sessions:
-        if not isinstance(raw_session, Mapping) or not raw_session.get("id"):
-            continue
-        report_response = (
-            db.table(REPORTS_TABLE)
-            .select("report")
-            .eq("session_id", str(raw_session["id"]))
-            .limit(1)
-            .execute()
-        )
-        report_row = _single_row(report_response.data)
-        report = report_row.get("report") if report_row else None
-        if isinstance(report, Mapping) and isinstance(report.get("weak_topics"), list):
-            return [WeakTopic.model_validate(item) for item in report["weak_topics"]]
+    report_row = _single_row(report_response.data)
+    report = report_row.get("report") if report_row else None
+    if isinstance(report, Mapping) and isinstance(report.get("weak_topics"), list):
+        return [WeakTopic.model_validate(item) for item in report["weak_topics"]]
     return []
 
 
@@ -108,6 +96,7 @@ def create_session(
         db.table(SESSIONS_TABLE)
         .insert(
             {
+                "user_id": user_id,
                 "config": config.model_dump(mode="json"),
                 "state": state.model_dump(mode="json"),
                 "status": SessionStatus.ACTIVE.value,

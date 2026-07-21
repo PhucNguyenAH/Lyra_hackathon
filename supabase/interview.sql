@@ -2,6 +2,7 @@
 
 create table if not exists interview_sessions (
     id         uuid primary key default gen_random_uuid(),
+    user_id    uuid,
     config     jsonb not null,
     state      jsonb not null,
     status     text not null default 'active'
@@ -10,11 +11,16 @@ create table if not exists interview_sessions (
     updated_at timestamptz not null default now()
 );
 
+-- Upgrade databases created from the first hackathon migration.
+alter table interview_sessions add column if not exists user_id uuid;
+
 create index if not exists idx_interview_sessions_created
     on interview_sessions(created_at desc);
 
-create index if not exists idx_interview_sessions_config
-    on interview_sessions using gin(config);
+create index if not exists idx_interview_sessions_user
+    on interview_sessions(user_id, created_at desc);
+
+drop index if exists idx_interview_sessions_config;
 
 create table if not exists interview_reports (
     session_id uuid primary key references interview_sessions(id) on delete cascade,
