@@ -6,6 +6,7 @@ build
 __pycache__
 *.pyc
 chromedriver
+docs/
 .DS_Store
 .vscode/
 .env/
