@@ -52,3 +52,6 @@ resume_embeddings/
 # Resume inputs (personal data)
 resumes/
 
+# Superpowers session scratch (ledgers, briefs, review packages)
+.superpowers/
+
