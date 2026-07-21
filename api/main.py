@@ -1,7 +1,10 @@
 """FastAPI application exposing the LinkedIn job scraper."""
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger("api.main")
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
@@ -22,12 +25,29 @@ MAX_CONCURRENT_SCRAPES = int(os.environ.get("MAX_CONCURRENT_SCRAPES", "2"))
 
 def _materialize_session_file() -> None:
     """Write the session JSON from the env var to disk if no file exists yet."""
-    if SESSION_JSON and not os.path.exists(SESSION_FILE):
-        parent = os.path.dirname(SESSION_FILE)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(SESSION_FILE, "w") as fh:
-            fh.write(SESSION_JSON)
+    abspath = os.path.abspath(SESSION_FILE)
+    json_len = len(SESSION_JSON) if SESSION_JSON else 0
+    logger.info(
+        "Session bootstrap: file=%s (cwd=%s) exists=%s | LINKEDIN_SESSION_JSON set=%s len=%d",
+        abspath, os.getcwd(), os.path.exists(SESSION_FILE),
+        bool(SESSION_JSON), json_len,
+    )
+    if os.path.exists(SESSION_FILE):
+        return
+    if not SESSION_JSON:
+        logger.error(
+            "No LinkedIn session available: file %s is missing AND the "
+            "LINKEDIN_SESSION_JSON env var is empty/unset. Set LINKEDIN_SESSION_JSON "
+            "to the full contents of linkedin_session.json (or mount the file and set "
+            "LINKEDIN_SESSION_FILE).", abspath,
+        )
+        return
+    parent = os.path.dirname(SESSION_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(SESSION_FILE, "w") as fh:
+        fh.write(SESSION_JSON)
+    logger.info("Wrote session file %s (%d bytes) from LINKEDIN_SESSION_JSON", abspath, json_len)
 
 
 @asynccontextmanager
