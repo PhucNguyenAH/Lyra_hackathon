@@ -25,6 +25,7 @@ Every 30 seconds, the watcher:
 | `transitions.py` | Legal transition table and deterministic automation policy. |
 | `loop.py` | Polling, orchestration, Supabase writes, logging, retries, and prep trigger. |
 | `api.py` | Reusable FastAPI startup and shutdown integration. |
+| `server.py` | Runnable package-local FastAPI app for frontend integration. |
 | `eval/fixtures/emails.json` | Twelve synthetic safety and classification cases. |
 | `eval/test_watcher.py` | Live-model intent accuracy and false-auto evaluation. |
 
@@ -161,6 +162,27 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 For Gmail, enable two-step verification and create an app password for the burner account. Do not use the normal Gmail password.
 
 ## Attaching it to FastAPI later
+
+For local frontend integration, run the package-local API:
+
+```bash
+uvicorn email_services.server:app --reload --port 8008
+```
+
+Run the frontend on its required port:
+
+```bash
+cd front-end
+npm run dev -- --port 3001
+```
+
+The dashboard reads `NEXT_PUBLIC_API_URL` and polls these routes:
+
+```text
+GET  /email-services/notifications
+POST /email-services/needs-attention/{id}/confirm
+POST /email-services/needs-attention/{id}/dismiss
+```
 
 For a new application:
 
