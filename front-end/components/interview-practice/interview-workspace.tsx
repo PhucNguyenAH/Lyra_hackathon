@@ -308,6 +308,34 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
     setMessages((prev) => [...prev, hintMsg]);
   };
 
+  const handleNextTopic = () => {
+    if (isInterviewerThinking) return;
+
+    const activeTopicIdx = topics.findIndex((topic) => topic.status === "active");
+    const nextTopic = topics[activeTopicIdx + 1];
+
+    if (!nextTopic) {
+      toast.info("You are already on the final interview topic.");
+      return;
+    }
+
+    setTopics((prev) =>
+      prev.map((topic, index) => {
+        if (index === activeTopicIdx) return { ...topic, status: "completed" };
+        if (index === activeTopicIdx + 1) return { ...topic, status: "active" };
+        return topic;
+      })
+    );
+
+    const interviewerMsg: Message = {
+      id: `msg-skip-${Date.now()}`,
+      sender: "interviewer",
+      text: `Let's move to ${nextTopic.name}: ${getNextQuestion(nextTopic.id)}`,
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, interviewerMsg]);
+  };
+
   const handleFinishEarly = () => {
     if (answeredQuestions.length === 0) {
       toast.error("Please answer at least one question before terminating the mock round early.");
@@ -647,6 +675,15 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
                 className="h-9 text-[11px] border-zinc-250 hover:bg-zinc-100 flex items-center gap-1 px-3 font-semibold text-zinc-750 shadow-none"
               >
                 <HelpCircle className="h-3.5 w-3.5" /> Hint
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleNextTopic}
+                disabled={isInterviewerThinking}
+                className="h-9 text-[11px] border-zinc-250 hover:bg-zinc-100 flex items-center gap-1 px-3 font-semibold text-zinc-750 shadow-none"
+              >
+                Next topic <ChevronRight className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="outline"
