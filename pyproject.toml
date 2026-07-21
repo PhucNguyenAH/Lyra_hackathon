@@ -54,7 +54,7 @@ Repository = "https://github.com/joeyism/linkedin_scraper"
 Issues = "https://github.com/joeyism/linkedin_scraper/issues"
 
 [tool.setuptools]
-packages = ["linkedin_scraper", "linkedin_scraper.core", "linkedin_scraper.models", "linkedin_scraper.scrapers"]
+packages = ["api", "linkedin_scraper", "linkedin_scraper.core", "linkedin_scraper.models", "linkedin_scraper.scrapers"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
