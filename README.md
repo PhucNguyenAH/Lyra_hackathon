@@ -59,7 +59,6 @@ With the `hack` env active (or use the full python path above):
 python create_session.py
 ```
 ### Run job scraper
-Copy `.env.example` to `.env` and add you LinkeIn account
 
 ```
 python scrape_jobs.py
