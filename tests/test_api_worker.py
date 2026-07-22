@@ -65,8 +65,12 @@ async def test_run_job_no_results_sets_error():
     search = MagicMock()
     search.search = AsyncMock(return_value=[])
 
+    async def fake_logged_in(page):
+        return True
+
     with patch("api.scraper_worker.JobSearchScraper", return_value=search), \
-         patch("api.scraper_worker.JobScraper", return_value=MagicMock()):
+         patch("api.scraper_worker.JobScraper", return_value=MagicMock()), \
+         patch("api.scraper_worker.is_logged_in", fake_logged_in):
         await run_job(job_id, "Nope", "Nowhere",
                       store=store, browser=browser, semaphore=_semaphore())
 
@@ -75,6 +79,56 @@ async def test_run_job_no_results_sets_error():
     assert stored["error"] == "no jobs found"
     assert browser.page.closed is True
     search.search.assert_awaited_once_with(keywords="Nope", location="Nowhere", limit=1)
+
+
+async def test_run_job_expired_session_flips_and_reports(monkeypatch):
+    store = JobStore()
+    job_id = store.create()
+    browser = FakeBrowser()
+    expired = {"called": False}
+
+    search = MagicMock()
+    search.search = AsyncMock(return_value=[])  # empty result
+
+    async def fake_logged_in(page):
+        return False  # session expired -> login wall
+
+    with patch("api.scraper_worker.JobSearchScraper", return_value=search), \
+         patch("api.scraper_worker.JobScraper", return_value=MagicMock()), \
+         patch("api.scraper_worker.is_logged_in", fake_logged_in):
+        await run_job(job_id, "AI", "Sydney",
+                      store=store, browser=browser, semaphore=_semaphore(),
+                      on_expired=lambda: expired.__setitem__("called", True))
+
+    stored = store.get(job_id)
+    assert stored["status"] == "error"
+    assert "expired" in stored["error"].lower()
+    assert expired["called"] is True
+
+
+async def test_run_job_no_results_when_logged_in(monkeypatch):
+    store = JobStore()
+    job_id = store.create()
+    browser = FakeBrowser()
+    expired = {"called": False}
+
+    search = MagicMock()
+    search.search = AsyncMock(return_value=[])
+
+    async def fake_logged_in(page):
+        return True  # still logged in -> genuinely no jobs
+
+    with patch("api.scraper_worker.JobSearchScraper", return_value=search), \
+         patch("api.scraper_worker.JobScraper", return_value=MagicMock()), \
+         patch("api.scraper_worker.is_logged_in", fake_logged_in):
+        await run_job(job_id, "Nope", "Nowhere",
+                      store=store, browser=browser, semaphore=_semaphore(),
+                      on_expired=lambda: expired.__setitem__("called", True))
+
+    stored = store.get(job_id)
+    assert stored["status"] == "error"
+    assert stored["error"] == "no jobs found"
+    assert expired["called"] is False
 
 
 async def test_run_job_search_exception_sets_error():
