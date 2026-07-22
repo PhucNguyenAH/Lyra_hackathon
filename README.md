@@ -1,5 +1,15 @@
 # Lyra Hackathon
 
+## Athena backend
+
+The root FastAPI application serves the email and AI interview features:
+
+```bash
+uvicorn server:app --reload --port 8008
+```
+
+Interactive API documentation is available at `http://localhost:8008/docs`.
+
 ### Create your branch
 
 ```
@@ -187,4 +197,3 @@ With `--expectations`:
 
 > Note: raw cosine scores from the same search tend to cluster in a narrow
 > band — treat them as a ranking, not a "match %".
-

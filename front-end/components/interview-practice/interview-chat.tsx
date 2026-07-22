@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Send, HelpCircle, User, Loader2, Sparkles } from "lucide-react";
+import { Mic, MicOff, Send, HelpCircle, User, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -13,25 +13,67 @@ export interface Message {
   sender: "interviewer" | "candidate";
   text: string;
   timestamp: Date;
-  status?: "pending" | "sent" | "analyzed";
 }
 
 interface InterviewChatProps {
   messages: Message[];
   onSendMessage: (text: string) => void;
   isInterviewerThinking: boolean;
+  interviewerName?: string;
+  inactivityNotice?: string | null;
+  onInputActivity?: () => void;
+}
+
+interface SpeechRecognitionResultEventLike extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEventLike extends Event {
+  error: string;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
 }
 
 export function InterviewChat({
   messages,
   onSendMessage,
   isInterviewerThinking,
+  interviewerName = "Alex — Technical Interviewer",
+  inactivityNotice,
+  onInputActivity,
 }: InterviewChatProps) {
   const [inputText, setInputText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [speechNotice, setSpeechNotice] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const transcriptBeforeRecordingRef = useRef("");
+  const currentRecognitionTranscriptRef = useRef("");
+  const manualStopRef = useRef(false);
+  const isRecordingRef = useRef(false);
 
   // Auto-scroll to bottom of chat
   useEffect(() => {
@@ -41,18 +83,36 @@ export function InterviewChat({
   // Recording Timer Effect
   useEffect(() => {
     if (isRecording) {
+      let elapsedSeconds = 0;
       recordingTimer.current = setInterval(() => {
-        setRecordingSeconds((prev) => prev + 1);
+        elapsedSeconds += 1;
+        setRecordingSeconds(elapsedSeconds);
+
+        if (elapsedSeconds >= 300) {
+          // Set these before stop() so onend knows this was intentional and does not restart.
+          manualStopRef.current = true;
+          isRecordingRef.current = false;
+          recognitionRef.current?.stop();
+          setIsRecording(false);
+          setSpeechNotice("Voice recording reached the 5-minute limit. Your transcript has been saved.");
+        }
       }, 1000);
     } else {
       if (recordingTimer.current) clearInterval(recordingTimer.current);
-      setRecordingSeconds(0);
     }
 
     return () => {
       if (recordingTimer.current) clearInterval(recordingTimer.current);
     };
   }, [isRecording]);
+
+  useEffect(() => {
+    return () => {
+      manualStopRef.current = true;
+      isRecordingRef.current = false;
+      recognitionRef.current?.abort();
+    };
+  }, []);
 
   const handleSend = () => {
     if (inputText.trim()) {
@@ -61,17 +121,117 @@ export function InterviewChat({
     }
   };
 
+  const startVoiceRecognition = () => {
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setSpeechError(
+        "Voice typing is not supported in this browser. Try Chrome or Edge, or type your answer."
+      );
+      return;
+    }
+
+    setSpeechError(null);
+    setSpeechNotice(null);
+    transcriptBeforeRecordingRef.current = inputText.trim();
+    currentRecognitionTranscriptRef.current = "";
+    manualStopRef.current = false;
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-AU";
+
+    recognition.onresult = (event) => {
+      let finalTranscript = "";
+      let interimTranscript = "";
+
+      for (let index = 0; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0]?.transcript ?? "";
+        if (event.results[index].isFinal) finalTranscript += transcript;
+        else interimTranscript += transcript;
+      }
+
+      const combinedTranscript = [
+        transcriptBeforeRecordingRef.current,
+        finalTranscript.trim(),
+        interimTranscript.trim(),
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      currentRecognitionTranscriptRef.current = [
+        finalTranscript.trim(),
+        interimTranscript.trim(),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      onInputActivity?.();
+      setInputText(combinedTranscript);
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === "no-speech") return;
+
+      const message =
+        event.error === "not-allowed" || event.error === "service-not-allowed"
+          ? "Microphone access was denied. Allow microphone access in your browser settings and try again."
+          : `Voice typing stopped (${event.error}). Please try again.`;
+      manualStopRef.current = true;
+      isRecordingRef.current = false;
+      setSpeechError(message);
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      if (currentRecognitionTranscriptRef.current) {
+        transcriptBeforeRecordingRef.current = [
+          transcriptBeforeRecordingRef.current,
+          currentRecognitionTranscriptRef.current,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        currentRecognitionTranscriptRef.current = "";
+        setInputText(transcriptBeforeRecordingRef.current);
+      }
+
+      if (!manualStopRef.current && isRecordingRef.current) {
+        try {
+          recognition.start();
+          return;
+        } catch {
+          setSpeechError("Voice typing could not restart. Please click the microphone to continue.");
+        }
+      }
+
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+
+    try {
+      recognition.start();
+      setRecordingSeconds(0);
+      isRecordingRef.current = true;
+      setIsRecording(true);
+    } catch {
+      recognitionRef.current = null;
+      setSpeechError("Voice typing could not start. Please try again.");
+    }
+  };
+
   const handleVoiceRecordToggle = () => {
     if (isRecording) {
-      // Stopped: Populate with mock voice transcript
+      manualStopRef.current = true;
+      isRecordingRef.current = false;
+      recognitionRef.current?.stop();
+      setRecordingSeconds(0);
       setIsRecording(false);
-      setInputText(
-        "At CloudCorp, I managed a team of 4 engineers where we built our main client application using Next.js App Router and React 19. I was responsible for performance, reducing the LCP by 40% and optimizing our chunk sizes by integrating custom Tailwind CSS configurations."
-      );
     } else {
-      // Started
-      setInputText("");
-      setIsRecording(true);
+      startVoiceRecognition();
     }
   };
 
@@ -89,7 +249,7 @@ export function InterviewChat({
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
           </span>
-          Interviewer Conversation Feed
+          {interviewerName}
         </CardTitle>
       </CardHeader>
 
@@ -126,7 +286,7 @@ export function InterviewChat({
                   )}>
                     {msg.text}
                   </div>
-                  <span className="text-[9px] text-zinc-400 dark:text-zinc-550 px-1 block">
+                  <span className="text-[11px] text-zinc-400 dark:text-zinc-500 px-1 block">
                     {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
@@ -140,8 +300,8 @@ export function InterviewChat({
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400 flex-shrink-0">
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
-              <div className="p-3 bg-white dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 rounded-2xl rounded-tl-sm text-zinc-400 dark:text-zinc-550 shadow-sm flex items-center gap-1.5 font-medium italic">
-                AI Interviewer is analyzing response rubrics...
+              <div className="p-3 bg-white dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 rounded-2xl rounded-tl-sm text-zinc-400 dark:text-zinc-500 shadow-sm flex items-center gap-1.5 font-medium italic">
+                Interviewer is thinking...
               </div>
             </div>
           )}
@@ -161,19 +321,37 @@ export function InterviewChat({
 
             {/* Bouncing audio wave simulation */}
             <div className="flex items-center gap-0.5 h-6">
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((bar) => (
+              {[10, 17, 13, 21, 15, 19, 11, 16].map((height, index) => (
                 <span
-                  key={bar}
-                  className="w-[3px] bg-red-500 dark:bg-red-400 rounded-full"
+                  key={index}
+                  className="w-[3px] bg-red-500 dark:bg-red-400 rounded-full animate-bounce"
                   style={{
-                    height: `${Math.floor(Math.random() * 16) + 6}px`,
-                    animationDelay: `${bar * 0.1}s`,
-                    animationDuration: `${0.4 + Math.random() * 0.4}s`,
+                    height: `${height}px`,
+                    animationDelay: `${index * 0.1}s`,
+                    animationDuration: `${0.45 + (index % 4) * 0.1}s`,
                   }}
                 />
               ))}
             </div>
           </div>
+        )}
+
+        {speechError && (
+          <p role="alert" className="w-full text-xs text-red-600 dark:text-red-400">
+            {speechError}
+          </p>
+        )}
+
+        {speechNotice && (
+          <p role="status" className="w-full text-xs text-indigo-600 dark:text-indigo-400">
+            {speechNotice}
+          </p>
+        )}
+
+        {inactivityNotice && (
+          <p role="status" className="w-full text-xs text-amber-700 dark:text-amber-300">
+            {inactivityNotice}
+          </p>
         )}
 
         <div className="flex w-full gap-2 items-end">
@@ -183,6 +361,7 @@ export function InterviewChat({
             variant="outline"
             size="icon"
             onClick={handleVoiceRecordToggle}
+            disabled={isInterviewerThinking}
             className={cn(
               "w-11 h-11 rounded-xl flex-shrink-0 transition-colors border",
               isRecording
@@ -200,7 +379,10 @@ export function InterviewChat({
             <Textarea
               placeholder={isRecording ? "Speak now..." : "Type your answer here..."}
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                onInputActivity?.();
+              }}
               disabled={isRecording}
               aria-label="Your answer"
               className="min-h-[44px] max-h-[120px] py-2.5 px-3 pr-10 text-xs resize-none rounded-xl bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-indigo-500"

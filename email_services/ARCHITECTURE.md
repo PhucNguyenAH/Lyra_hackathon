@@ -166,7 +166,7 @@ For Gmail, enable two-step verification and create an app password for the burne
 For local frontend integration, run the package-local API:
 
 ```bash
-uvicorn email_services.server:app --reload --port 8008
+uvicorn server:app --reload --port 8008
 ```
 
 Run the frontend on its required port:
