@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from linkedin_scraper.core.browser import BrowserManager
 
 from .models import JobCreatedResponse, JobRequest, JobStatusResponse
+from .scraper_session import ScraperSession
 from .scraper_worker import run_job
 from .store import JobStore
 
@@ -54,15 +55,24 @@ def _materialize_session_file() -> None:
 async def lifespan(app: FastAPI):
     _materialize_session_file()
     browser = BrowserManager(headless=True)
-    try:
-        await browser.start()
-        await browser.load_session(SESSION_FILE)
-    except Exception:
-        await browser.close()
-        raise
-    app.state.browser = browser
+    await browser.start()
+    scraper = ScraperSession(
+        browser=browser,
+        max_concurrent=MAX_CONCURRENT_SCRAPES,
+        session_file=SESSION_FILE,
+    )
+    if os.path.exists(SESSION_FILE):
+        try:
+            await browser.load_session(SESSION_FILE)
+            scraper.has_session = True
+            logger.info("Loaded LinkedIn session from %s", SESSION_FILE)
+        except Exception:
+            logger.exception("Failed to load session %s; starting unauthenticated", SESSION_FILE)
+    else:
+        logger.warning("No session file at %s; starting unauthenticated. "
+                       "Log in via /connect-linkedin.", SESSION_FILE)
+    app.state.scraper = scraper
     app.state.store = JobStore()
-    app.state.semaphore = asyncio.Semaphore(MAX_CONCURRENT_SCRAPES)
     try:
         yield
     finally:
@@ -74,6 +84,12 @@ app = FastAPI(title="Job Scraper API", lifespan=lifespan)
 
 @app.post("/jobs", status_code=202, response_model=JobCreatedResponse)
 async def create_job(req: JobRequest, background: BackgroundTasks):
+    scraper = app.state.scraper
+    if not scraper.has_session:
+        raise HTTPException(
+            status_code=409,
+            detail="no LinkedIn session — open /connect-linkedin to log in",
+        )
     job_id = app.state.store.create()
     background.add_task(
         run_job,
@@ -81,8 +97,8 @@ async def create_job(req: JobRequest, background: BackgroundTasks):
         req.title,
         req.location,
         store=app.state.store,
-        browser=app.state.browser,
-        semaphore=app.state.semaphore,
+        browser=scraper.browser,
+        semaphore=scraper.semaphore,
     )
     return {"job_id": job_id, "status": "pending"}
 

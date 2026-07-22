@@ -56,6 +56,7 @@ def test_post_then_get_returns_done_result():
     try:
         from api.main import app
         with TestClient(app) as client:
+            client.app.state.scraper.has_session = True
             resp = client.post("/jobs", json={"title": "AI Engineer", "location": "Sydney"})
             assert resp.status_code == 202
             body = resp.json()
