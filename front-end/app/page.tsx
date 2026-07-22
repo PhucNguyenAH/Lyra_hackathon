@@ -1,23 +1,25 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
 import { type JobPosting } from "@/components/jobs-dashboard";
-import { JOB_POSTINGS_SEED, sortAustraliaFirst, DEMO_SEEDED_APPLICATION_ID } from "@/lib/job-postings-seed";
+import { JOB_POSTINGS_SEED, sortAustraliaFirst } from "@/lib/job-postings-seed";
 import { CVEditorWorkspace } from "@/components/cv-editor/cv-editor-workspace";
 import { InterviewWorkspace } from "@/components/interview-practice/interview-workspace";
 import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { tailorApplication } from "@/lib/profile-api";
+import { tailorPreview } from "@/lib/profile-api";
 
 type TabId = "drafts" | "applications" | "cv-editor" | "interview";
 
 const CONFIGURED_USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
 const BROWSER_USER_ID_KEY = "lyra-interview-user-id";
+const DRAFTS_STORAGE_KEY = "lyra-cv-drafts";
+const CV_DATABASE_STORAGE_KEY = "lyra-cv-database";
 
 function getBuilderUserId(): string {
   if (CONFIGURED_USER_ID) return CONFIGURED_USER_ID;
@@ -64,6 +66,33 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
   const [cvDatabase, setCvDatabase] = useState<{ [draftId: string]: CVData }>({
     "draft-1": initialKianCVData,
   });
+
+  // Persist drafts + their CV content across reloads — previously pure in-memory
+  // state, so every "Enhance CV" row vanished the moment the page refreshed.
+  const hasHydratedDraftsRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      const savedDrafts = window.localStorage.getItem(DRAFTS_STORAGE_KEY);
+      const savedDatabase = window.localStorage.getItem(CV_DATABASE_STORAGE_KEY);
+      if (savedDrafts) setDrafts(JSON.parse(savedDrafts) as CVDraft[]);
+      if (savedDatabase) setCvDatabase(JSON.parse(savedDatabase) as { [draftId: string]: CVData });
+    } catch {
+      // Corrupt or unavailable storage — keep the default starter draft.
+    } finally {
+      hasHydratedDraftsRef.current = true;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedDraftsRef.current) return;
+    window.localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
+  }, [drafts]);
+
+  useEffect(() => {
+    if (!hasHydratedDraftsRef.current) return;
+    window.localStorage.setItem(CV_DATABASE_STORAGE_KEY, JSON.stringify(cvDatabase));
+  }, [cvDatabase]);
 
   // Hoisted Jobs State — real seed pool only, Australia-based roles first, best score first within that.
   const [jobs] = useState<JobPosting[]>(() =>
@@ -206,9 +235,10 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
         return;
       }
       setTailoringState({ job, phase: "analyzing" });
-      let variant: Awaited<ReturnType<typeof tailorApplication>> | null = null;
+      let variant: Awaited<ReturnType<typeof tailorPreview>> | null = null;
       try {
-        variant = await tailorApplication(getBuilderUserId(), DEMO_SEEDED_APPLICATION_ID);
+        const jdText = `${job.title} at ${job.company} (${job.location}). Required skills: ${job.skillsRequired.join(", ")}.`;
+        variant = await tailorPreview(getBuilderUserId(), jdText);
       } catch (error) {
         toast.error(
           error instanceof Error

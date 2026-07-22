@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
 from markitdown import MarkItDown, MarkItDownException
+from pydantic import BaseModel, Field
 
 from profile.db import (
     ProfileNotFoundError,
@@ -21,7 +22,13 @@ from profile.db import (
 )
 from profile.ingest import ingest_cv
 from profile.schemas import CandidatePreferences, CVVariant, MasterProfile, ProfileRecord
-from profile.tailor import TailorValidationError, tailor_cv
+from profile.tailor import TailorValidationError, generate_tailored_variant, tailor_cv
+
+
+class TailorPreviewRequest(BaseModel):
+    """A one-off tailoring request against arbitrary JD text, no application_id needed."""
+
+    jd_text: str = Field(min_length=1, max_length=20_000)
 
 
 API_PREFIX = "/profile"
@@ -172,6 +179,24 @@ def tailor_application(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(error),
         ) from error
+    except TailorValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": str(error), "errors": error.errors},
+        ) from error
+
+
+@router.post(f"{API_PREFIX}/tailor-preview", response_model=CVVariant)
+def tailor_preview(
+    request: TailorPreviewRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> CVVariant:
+    """Tailor against any job text directly — no seeded application row required."""
+    try:
+        profile = get_master_for_user(user_id)
+        return generate_tailored_variant(profile.master, request.jd_text)
+    except ProfileNotFoundError as error:
+        raise _profile_error(error) from error
     except TailorValidationError as error:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

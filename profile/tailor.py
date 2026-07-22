@@ -87,17 +87,14 @@ def _generate_variant(client: StructuredClient, prompt: str) -> CVVariant:
     )
 
 
-def tailor_cv(
-    application_id: str,
-    master: MasterProfile,
-    jd_text: str,
-    profile_version: int,
-) -> CVVariant:
-    """Persist only a variant that survives one explicit grounding retry."""
+def generate_tailored_variant(master: MasterProfile, jd_text: str) -> CVVariant:
+    """Select from the master profile against any JD text, with one grounding retry.
+
+    No persistence here — callers that have a real application_id to attach the
+    result to should use tailor_cv instead.
+    """
     if not jd_text.strip():
         raise ValueError("A non-empty job description is required for tailoring")
-    if profile_version < 1:
-        raise ValueError("profile_version must be at least 1")
 
     prompt = TAILOR_PROMPT.format(
         master_json=json.dumps(master.model_dump(mode="json"), ensure_ascii=False),
@@ -119,6 +116,21 @@ def tailor_cv(
 
     if errors:
         raise TailorValidationError(errors)
+
+    return variant
+
+
+def tailor_cv(
+    application_id: str,
+    master: MasterProfile,
+    jd_text: str,
+    profile_version: int,
+) -> CVVariant:
+    """Persist only a variant that survives one explicit grounding retry."""
+    if profile_version < 1:
+        raise ValueError("profile_version must be at least 1")
+
+    variant = generate_tailored_variant(master, jd_text)
 
     insert_cv_variant(
         application_id=application_id,
