@@ -6,10 +6,11 @@ import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
 import { type JobPosting } from "@/components/jobs-dashboard";
 import { CVEditorWorkspace } from "@/components/cv-editor/cv-editor-workspace";
 import { InterviewWorkspace } from "@/components/interview-practice/interview-workspace";
+import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 
-type TabId = "drafts" | "cv-editor" | "interview";
+type TabId = "drafts" | "applications" | "cv-editor" | "interview";
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("drafts");
@@ -287,6 +288,8 @@ export default function Home() {
           onExport={handleExportCV}
         />
       )}
+
+      {activeTab === "applications" && <ApplicationPipeline jobs={jobs} />}
 
       {activeTab === "interview" && (
         <InterviewWorkspace

@@ -5,7 +5,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { FileText, MessageSquare, Briefcase, FolderKanban, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type TabId = "drafts" | "cv-editor" | "interview";
+type TabId = "drafts" | "applications" | "cv-editor" | "interview";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -30,6 +30,11 @@ export function DashboardLayout({
       icon: FolderKanban,
     },
     {
+      id: "applications" as TabId,
+      name: "Applications",
+      icon: Briefcase,
+    },
+    {
       id: "cv-editor" as TabId,
       name: "CV Builder",
       icon: FileText,
@@ -44,6 +49,8 @@ export function DashboardLayout({
   const activeTabName =
     activeTab === "drafts"
       ? "Athena Overview Hub"
+      : activeTab === "applications"
+      ? "Application Pipeline"
       : activeTab === "cv-editor"
       ? "CV Builder & Editor"
       : "Interview Practice Simulator";
