@@ -15,6 +15,7 @@ from .auth.login_session import LoginSessionManager
 from .auth.routes import router as auth_router
 from .jobs import router as jobs_router
 from .scraper_session import ScraperSession
+from .session_store import build_session_store
 from .store import JobStore
 
 # Path to the logged-in LinkedIn session file. Overridable so deployments can
@@ -24,6 +25,9 @@ SESSION_FILE = os.environ.get("LINKEDIN_SESSION_FILE", "linkedin_session.json")
 # supplied in this env var and is written to SESSION_FILE at startup.
 SESSION_JSON = os.environ.get("LINKEDIN_SESSION_JSON")
 MAX_CONCURRENT_SCRAPES = int(os.environ.get("MAX_CONCURRENT_SCRAPES", "2"))
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+SESSION_ENCRYPTION_KEY = os.environ.get("SESSION_ENCRYPTION_KEY")
 
 
 def _materialize_session_file() -> None:
@@ -53,6 +57,49 @@ def _materialize_session_file() -> None:
     logger.info("Wrote session file %s (%d bytes) from LINKEDIN_SESSION_JSON", abspath, json_len)
 
 
+def _bootstrap_session_state(store) -> "str | None":
+    """Resolve the session JSON to load and ensure it is written to SESSION_FILE.
+
+    Precedence: store -> first-run file->store migration -> LINKEDIN_SESSION_JSON
+    env -> existing file.
+    """
+    from .session_store import SupabaseSessionStore
+
+    state = store.load()
+    if state is None and isinstance(store, SupabaseSessionStore) and os.path.exists(SESSION_FILE):
+        with open(SESSION_FILE) as fh:
+            state = fh.read()
+        try:
+            store.save(state)
+            logger.info("Migrated local session file to Supabase")
+        except Exception:
+            logger.exception("Failed to migrate local session file to Supabase")
+    if state is None:
+        _materialize_session_file()  # LINKEDIN_SESSION_JSON -> SESSION_FILE
+        if os.path.exists(SESSION_FILE):
+            with open(SESSION_FILE) as fh:
+                state = fh.read()
+    if state is not None:
+        parent = os.path.dirname(SESSION_FILE)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(SESSION_FILE, "w") as fh:
+            fh.write(state)
+    return state
+
+
+def _make_on_saved(store, session_file, scraper):
+    """Return an async hook that persists the captured session then hot-reloads."""
+    async def _on_saved():
+        try:
+            with open(session_file) as fh:
+                store.save(fh.read())
+        except Exception:
+            logger.exception("Failed to persist session to store")
+        await scraper.reload_from_file()
+    return _on_saved
+
+
 async def _start_x11vnc():
     """Start x11vnc against the Xvfb display, bound to localhost:5900.
 
@@ -70,7 +117,12 @@ async def _start_x11vnc():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _materialize_session_file()
+    store = build_session_store(
+        session_file=SESSION_FILE,
+        supabase_url=SUPABASE_URL,
+        service_key=SUPABASE_SERVICE_ROLE_KEY,
+        encryption_key=SESSION_ENCRYPTION_KEY,
+    )
     browser = BrowserManager(headless=True)
     await browser.start()
     scraper = ScraperSession(
@@ -78,16 +130,17 @@ async def lifespan(app: FastAPI):
         max_concurrent=MAX_CONCURRENT_SCRAPES,
         session_file=SESSION_FILE,
     )
-    if os.path.exists(SESSION_FILE):
+    state = _bootstrap_session_state(store)
+    if state is not None:
         try:
             await browser.load_session(SESSION_FILE)
             scraper.has_session = True
-            logger.info("Loaded LinkedIn session from %s", SESSION_FILE)
+            logger.info("Loaded LinkedIn session at startup")
         except Exception:
-            logger.exception("Failed to load session %s; starting unauthenticated", SESSION_FILE)
+            logger.exception("Failed to load session; starting unauthenticated")
     else:
-        logger.warning("No session file at %s; starting unauthenticated. "
-                       "Log in via /connect-linkedin.", SESSION_FILE)
+        logger.warning("No LinkedIn session found; starting unauthenticated. "
+                       "Log in via /connect-linkedin.")
     app.state.scraper = scraper
     app.state.store = JobStore()
     app.state.login_manager = LoginSessionManager(
@@ -96,7 +149,7 @@ async def lifespan(app: FastAPI):
         ),
         vnc_starter=_start_x11vnc,
         login_waiter=wait_for_manual_login,
-        on_saved=scraper.reload_from_file,
+        on_saved=_make_on_saved(store, SESSION_FILE, scraper),
         save_path=SESSION_FILE,
     )
     try:
