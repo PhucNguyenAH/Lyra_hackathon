@@ -2,8 +2,10 @@
 
 import React, { useEffect, useState } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { FileText, MessageSquare, Briefcase, FolderKanban, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { FileText, MessageSquare, Briefcase, FolderKanban, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ConnectLinkedInPanel } from "@/components/connect-linkedin-panel";
 
 type TabId = "drafts" | "cv-editor" | "interview";
 
@@ -22,6 +24,7 @@ export function DashboardLayout({
 }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [accountSettingsOpen, setAccountSettingsOpen] = useState(false);
 
   const menuItems = [
     {
@@ -181,9 +184,38 @@ export function DashboardLayout({
                 </div>
               )}
             </div>
+            {/* Account settings / Connect LinkedIn — see front-end/docs/ai/2026-07-22-account-settings-linkedin-entry.md */}
+            <button
+              type="button"
+              onClick={() => setAccountSettingsOpen(true)}
+              className={cn(
+                "group relative mt-2 flex w-full items-center gap-2.5 rounded-lg border border-transparent px-2 py-2 text-left text-zinc-650 transition-colors duration-150 hover:bg-zinc-100/80 dark:text-zinc-400 dark:hover:bg-zinc-800/60",
+                !sidebarOpen && "lg:justify-center lg:px-0"
+              )}
+            >
+              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors duration-150 group-hover:text-zinc-700 dark:group-hover:text-zinc-300">
+                <Settings className="h-4 w-4" />
+              </div>
+              {(sidebarOpen || mobileNavOpen) && (
+                <p className="truncate text-xs font-semibold tracking-tight">
+                  Account settings
+                </p>
+              )}
+            </button>
           </div>
         </aside>
       )}
+
+      {/* Account settings / Connect LinkedIn — see front-end/docs/ai/2026-07-22-account-settings-linkedin-entry.md */}
+      <Dialog open={accountSettingsOpen} onOpenChange={setAccountSettingsOpen}>
+        <DialogContent className="flex h-[min(90dvh,820px)] max-h-[90dvh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-3xl">
+          <DialogHeader className="shrink-0 border-b border-zinc-100 px-6 py-5 pr-12 dark:border-zinc-800">
+            <DialogTitle>Account settings</DialogTitle>
+            <DialogDescription>Connect LinkedIn to let Athena scrape jobs on your behalf.</DialogDescription>
+          </DialogHeader>
+          <ConnectLinkedInPanel />
+        </DialogContent>
+      </Dialog>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
