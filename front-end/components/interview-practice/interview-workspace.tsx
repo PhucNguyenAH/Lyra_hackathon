@@ -104,8 +104,8 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
   const [generalTrack, setGeneralTrack] = useState<"SWE" | "AI">("SWE");
 
   // Selected configuration references
-  const [selectedDraftId, setSelectedDraftId] = useState(drafts[0]?.id || "");
-  const [selectedJobId, setSelectedJobId] = useState("job-2"); // Default to Senior Frontend Architect
+  const [selectedDraftId, setSelectedDraftId] = useState("");
+  const [selectedJobId, setSelectedJobId] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isInterviewerThinking, setIsInterviewerThinking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -118,7 +118,6 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
   const inactivityStageRef = useRef<"idle" | "nudged" | "hinting" | "moving">("idle");
   const autoHintRef = useRef<() => void>(() => undefined);
   const autoMoveRef = useRef<() => void>(() => undefined);
-  const restoredSessionRef = useRef<string | null>(null);
   const nextLocalId = (prefix: string) => {
     localIdCounter.current += 1;
     return `${prefix}-${localIdCounter.current}`;
@@ -208,29 +207,43 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     { id: "job-3", title: "AI Engineer & Full Stack developer", company: "CognitiveAgents Corp", description: "Develop Python and FastAPI AI products with retrieval, vector databases, evaluation, React, Next.js, and Docker." },
   ];
 
-  const activeJob = targetJobs.find((j) => j.id === selectedJobId) || targetJobs[1];
+  const activeJob = targetJobs.find((job) => job.id === selectedJobId);
   const activeCV = cvDatabase[selectedDraftId];
+  const draftSelectItems = drafts.map((draft) => ({
+    value: draft.id,
+    label: `${draft.title} (${draft.role})`,
+  }));
+  const jobSelectItems = targetJobs.map((job) => ({
+    value: job.id,
+    label: `${job.title} @ ${job.company}`,
+  }));
 
   const handleStartClick = () => {
+    if (interviewMode === "tailored" && (!selectedDraftId || !activeCV)) {
+      toast.error("Choose a saved CV draft before starting.");
+      return;
+    }
+    if (interviewMode === "tailored" && !activeJob) {
+      toast.error("Choose a target job before starting.");
+      return;
+    }
     setShowConfirmStart(true);
   };
 
   const startInterview = async () => {
-    const firstDraftCV = drafts[0]?.id ? cvDatabase[drafts[0].id] : undefined;
-    const selectedCV = activeCV || firstDraftCV;
-    if (!selectedCV) {
-      toast.error("Select or import a CV before starting the interview.");
+    if (interviewMode === "tailored" && (!activeCV || !activeJob)) {
+      toast.error("Choose both a CV draft and target job before starting.");
       return;
     }
     setIsStarting(true);
     try {
       const jobDescription = interviewMode === "tailored"
-        ? `${activeJob.title} at ${activeJob.company}. ${activeJob.description}`
+        ? `${activeJob!.title} at ${activeJob!.company}. ${activeJob!.description}`
         : `General ${generalTrack === "AI" ? "AI engineering" : "software engineering"} interview practice.`;
       const session = await createInterview(
         getInterviewUserId(),
         jobDescription,
-        JSON.stringify(selectedCV),
+        JSON.stringify(activeCV ?? {}),
         interviewMode === "tailored"
           ? (drafts.find((draft) => draft.id === selectedDraftId)?.level || "Not specified")
           : "Junior to mid-level practice"
@@ -403,10 +416,10 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
       id: `session-${Date.now()}`,
       role: interviewMode === "general" 
         ? (generalTrack === "AI" ? "AI Engineer (General)" : "Software Engineer (General)") 
-        : activeJob.title,
-      company: interviewMode === "general" ? "General Prep" : activeJob.company,
+        : (activeJob?.title || "Selected role"),
+      company: interviewMode === "general" ? "General Prep" : (activeJob?.company || "Selected company"),
       date: new Date().toLocaleDateString(),
-      cvName: interviewMode === "general" ? "N/A" : (activeCV?.fullName || "Kian Nguyen"),
+      cvName: interviewMode === "general" ? "N/A" : (activeCV?.fullName || drafts.find((draft) => draft.id === selectedDraftId)?.title || "Selected CV"),
       score: finalScore,
       qa: records,
     };
@@ -417,8 +430,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
   };
 
   useEffect(() => {
-    if (!initialSessionId || restoredSessionRef.current === initialSessionId) return;
-    restoredSessionRef.current = initialSessionId;
+    if (!initialSessionId) return;
     let active = true;
     const restore = async () => {
       setIsStarting(true);
@@ -611,11 +623,11 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
               <>
                 <div className="flex justify-between">
                   <span className="font-semibold text-zinc-500">Resume profile:</span>
-                  <span className="font-bold text-zinc-800 truncate max-w-[200px]">{activeCV?.fullName || "Kian Nguyen"}</span>
+                  <span className="font-bold text-zinc-800 truncate max-w-[200px]">{activeCV?.fullName || drafts.find((draft) => draft.id === selectedDraftId)?.title || "Not selected"}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="font-semibold text-zinc-500">Target Role:</span>
-                  <span className="font-bold text-zinc-850 truncate max-w-[200px]">{activeJob.title}</span>
+                  <span className="font-bold text-zinc-850 truncate max-w-[200px]">{activeJob?.title || "Not selected"}</span>
                 </div>
               </>
             )}
@@ -681,7 +693,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                         : "border-zinc-200 text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-400"
                     )}
                   >
-                    <span className="block text-sm font-bold">Job and CV tailored</span><span className="mt-1 block text-xs font-normal leading-relaxed text-zinc-500">Questions based on a target job and your selected CV.</span>
+                    <span className="block text-sm font-bold">Job and CV tailored</span><span className="mt-1 block text-xs font-normal leading-relaxed text-zinc-500">Questions based on the saved draft and job you choose below.</span>
                   </button>
                   <button
                     type="button"
@@ -719,24 +731,16 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
               ) : (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   <div className="space-y-1.5">
-                    <label className="font-semibold text-zinc-500">Select Resume Version</label>
-                    <Select value={selectedDraftId} onValueChange={(val) => { if (val) setSelectedDraftId(val); }}>
-                      <SelectTrigger className="w-full h-9 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-none">
-                        <SelectValue placeholder="Select resume" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {drafts.map((d) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.title} ({d.role})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
+                    <label className="font-semibold text-zinc-500">Choose CV draft</label>
+                    <Select items={draftSelectItems} value={selectedDraftId} onValueChange={(value) => setSelectedDraftId(value ?? "")}>
+                      <SelectTrigger className="w-full h-9 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-none"><SelectValue placeholder="Select a saved CV draft" /></SelectTrigger>
+                      <SelectContent>{drafts.map((draft) => <SelectItem key={draft.id} value={draft.id}>{draft.title} ({draft.role})</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
 
                   <div className="space-y-1.5">
                     <label className="font-semibold text-zinc-500">Select Target Job Role</label>
-                    <Select value={selectedJobId} onValueChange={(val) => { if (val) setSelectedJobId(val); }}>
+                    <Select items={jobSelectItems} value={selectedJobId} onValueChange={(val) => { if (val) setSelectedJobId(val); }}>
                       <SelectTrigger className="w-full h-9 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-none">
                         <SelectValue placeholder="Select target job" />
                       </SelectTrigger>
@@ -862,7 +866,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                 {interviewMode === "general" ? (
                   <span>General Practice Track: <strong className="text-zinc-700 dark:text-zinc-300">{generalTrack === "AI" ? "AI Engineer" : "Software Engineer (SWE)"}</strong></span>
                 ) : (
-                  <span>Evaluating: <strong className="text-zinc-700 dark:text-zinc-300">{activeCV?.fullName}</strong> for <strong className="text-zinc-700 dark:text-zinc-300">{activeJob.title}</strong></span>
+                  <span>Evaluating: <strong className="text-zinc-700 dark:text-zinc-300">{activeCV?.fullName || "Selected CV"}</strong> for <strong className="text-zinc-700 dark:text-zinc-300">{activeJob?.title || "Selected job"}</strong></span>
                 )}
               </p>
             </div>
@@ -937,7 +941,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                 Technical Assessment Report Card
               </h1>
               <p className="text-xs text-zinc-550">
-                Mock evaluation details for {interviewMode === "general" ? `${generalTrack === "AI" ? "AI Engineer" : "Software Engineer (SWE)"}` : `${activeJob.title}`}
+                Mock evaluation details for {interviewMode === "general" ? `${generalTrack === "AI" ? "AI Engineer" : "Software Engineer (SWE)"}` : `${activeJob?.title || "selected job"}`}
               </p>
             </div>
             
