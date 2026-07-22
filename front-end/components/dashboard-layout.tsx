@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { FileText, MessageSquare, Briefcase, FolderKanban, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { FileText, MessageSquare, Briefcase, FolderKanban, Menu, PanelLeftClose, PanelLeftOpen, UserRound, X } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 type TabId = "drafts" | "applications" | "cv-editor" | "interview";
@@ -19,6 +20,8 @@ export function DashboardLayout({
   setActiveTab,
   hideSidebar = false,
 }: DashboardLayoutProps) {
+  const pathname = usePathname();
+  const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -48,6 +51,11 @@ export function DashboardLayout({
       name: "Interview Practice",
       icon: MessageSquare,
     },
+    {
+      id: "profile" as const,
+      name: "Profile",
+      icon: UserRound,
+    },
   ];
 
   const activeTabName =
@@ -57,6 +65,8 @@ export function DashboardLayout({
       ? "Application Pipeline"
       : activeTab === "cv-editor"
       ? "CV Builder & Editor"
+      : pathname.startsWith("/profile")
+      ? "Profile & Preferences"
       : "Interview Practice Simulator";
 
   // Lock body scroll while the mobile drawer is open
@@ -77,8 +87,9 @@ export function DashboardLayout({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavOpen]);
 
-  const handleSelectTab = (id: TabId) => {
-    setActiveTab(id);
+  const handleSelectTab = (id: TabId | "profile") => {
+    if (id === "profile") router.push("/profile");
+    else setActiveTab(id);
     setMobileNavOpen(false);
   };
 
@@ -137,7 +148,8 @@ export function DashboardLayout({
           <div className={cn("flex-1 space-y-1 overflow-y-auto py-3", sidebarOpen ? "px-2.5" : "px-2")}>
             {menuItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isProfileRoute = pathname.startsWith("/profile");
+              const isActive = item.id === "profile" ? isProfileRoute : !isProfileRoute && activeTab === item.id;
               return (
                 <button
                   key={item.id}

@@ -8,6 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
+  type CandidatePreferences,
+  ProfileApiError,
+  type ProfileRecord,
+  getProfile,
+  updatePreferences,
+  uploadCV,
+} from "@/lib/profile-api";
+import {
   BellRing,
   BriefcaseBusiness,
   Building2,
@@ -100,11 +108,31 @@ interface DraftsDashboardProps {
 
 const EMAIL_API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8008").replace(/\/$/, "");
 const EMAIL_POLL_INTERVAL_MS = 15_000;
+const PROFILE_USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
+const EMPTY_PROFILE_PREFERENCES: CandidatePreferences = {
+  display_name: "",
+  email: "",
+  current_title: "",
+  current_location: "",
+  target_titles: [],
+  preferred_locations: [],
+  work_modes: [],
+  employment_types: [],
+  willing_to_relocate: false,
+  work_authorization: "",
+  salary_expectation: "",
+};
 export const APPLICATION_STORAGE_KEY = "athena-job-applications-v1";
 
 export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardProps) {
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
-  const [profileSaved, setProfileSaved] = useState(false);
+  const [profileRecord, setProfileRecord] = useState<ProfileRecord | null>(null);
+  const [profileForm, setProfileForm] = useState<CandidatePreferences>(EMPTY_PROFILE_PREFERENCES);
+  const [setupMode, setSetupMode] = useState<"pdf" | "manual">("pdf");
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [importStatus, setImportStatus] = useState<"idle" | "extracting" | "ready">("idle");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [jobSearch, setJobSearch] = useState("");
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [emailDecisions, setEmailDecisions] = useState<EmailDecision[]>([]);
@@ -112,9 +140,6 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailActionId, setEmailActionId] = useState<string | null>(null);
   const [reviewEmailId, setReviewEmailId] = useState<string | null>(null);
-  const [setupMode, setSetupMode] = useState<"pdf" | "manual">("pdf");
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
-  const [importStatus, setImportStatus] = useState<"idle" | "extracting" | "ready">("idle");
   const [tailorJobId, setTailorJobId] = useState<string | null>(null);
   const [sourceDraftId, setSourceDraftId] = useState(drafts[0]?.id ?? "");
   const [tailorUploadName, setTailorUploadName] = useState<string | null>(null);
@@ -122,17 +147,6 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   const [applications, setApplications] = useState<Record<string, TrackedApplication>>({});
   const [applicationFilter, setApplicationFilter] = useState<ApplicationStatus | "ALL">("ALL");
   const [applicationsReady, setApplicationsReady] = useState(false);
-  const [profile, setProfile] = useState({
-    name: "Kian Nguyen",
-    email: "kiannguyen.works@gmail.com",
-    location: "Sydney, NSW",
-    targetRoles: "Backend Engineer, AI Engineer, Full Stack Developer",
-    skills: "Java, Spring Boot, Python, FastAPI, React, Next.js, PostgreSQL, AWS, Docker",
-    preferredLocation: "Sydney, NSW",
-    workMode: "Hybrid or remote",
-    seniority: "Graduate and junior roles",
-  });
-
   const filteredJobs = useMemo(() => {
     const query = jobSearch.trim().toLowerCase();
     return jobs.filter((job) => {
@@ -145,7 +159,6 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   const pendingCount = emailDecisions.filter((decision) => decision.state === "pending").length;
   const tailorJob = jobs.find((job) => job.id === tailorJobId);
   const trackedCount = Object.values(applications).filter((application) => application.status !== "NOT APPLIED").length;
-  const updateProfile = (field: keyof typeof profile, value: string) => setProfile((current) => ({ ...current, [field]: value }));
   const updateDecision = async (id: string, state: "confirmed" | "dismissed") => {
     setEmailActionId(id);
     setEmailError(null);
@@ -186,6 +199,27 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   };
 
   useEffect(() => {
+    if (!PROFILE_USER_ID) {
+      setProfileError("Set NEXT_PUBLIC_DEMO_USER_ID to use the saved profile.");
+      return;
+    }
+    let active = true;
+    void getProfile(PROFILE_USER_ID)
+      .then((savedProfile) => {
+        if (!active) return;
+        setProfileRecord(savedProfile);
+        setProfileForm(savedProfile.preferences);
+      })
+      .catch((error: unknown) => {
+        if (!active || (error instanceof ProfileApiError && error.status === 404)) return;
+        setProfileError(error instanceof Error ? error.message : "Could not load your profile.");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const loadSavedApplications = window.setTimeout(() => {
       try {
         const saved = window.localStorage.getItem(APPLICATION_STORAGE_KEY);
@@ -198,6 +232,51 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
     }, 0);
     return () => window.clearTimeout(loadSavedApplications);
   }, []);
+
+  const handleProfileCVUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !PROFILE_USER_ID) return;
+    setUploadedFileName(file.name);
+    setImportStatus("extracting");
+    setProfileError(null);
+    try {
+      const savedProfile = await uploadCV(
+        PROFILE_USER_ID,
+        file,
+        file.name.replace(/\.[^.]+$/, ""),
+      );
+      setProfileRecord(savedProfile);
+      setProfileForm(savedProfile.preferences);
+      setImportStatus("ready");
+    } catch (error) {
+      setImportStatus("idle");
+      setProfileError(error instanceof Error ? error.message : "Could not process this CV.");
+    }
+  };
+
+  const saveJobProfile = async () => {
+    if (!PROFILE_USER_ID) return;
+    if (!profileRecord) {
+      setProfileError("Upload a CV first so Athena can create your master profile.");
+      return;
+    }
+    setProfileSaving(true);
+    setProfileError(null);
+    try {
+      const savedProfile = await updatePreferences(PROFILE_USER_ID, {
+        ...profileForm,
+        target_titles: cleanList(profileForm.target_titles),
+        preferred_locations: cleanList(profileForm.preferred_locations),
+      });
+      setProfileRecord(savedProfile);
+      setProfileForm(savedProfile.preferences);
+      setProfileDialogOpen(false);
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "Could not save your profile.");
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (applicationsReady) window.localStorage.setItem(APPLICATION_STORAGE_KEY, JSON.stringify(applications));
@@ -234,21 +313,12 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
     const poll = window.setInterval(() => void loadNotifications(), EMAIL_POLL_INTERVAL_MS);
     return () => { active = false; window.clearInterval(poll); };
   }, []);
-  const handleCVUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploadedFileName(file.name);
-    setImportStatus("extracting");
-    setProfileSaved(false);
-    window.setTimeout(() => setImportStatus("ready"), 900);
-  };
-
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       <header className="flex flex-col gap-3 border-b border-zinc-200 pb-5 sm:flex-row sm:items-start sm:justify-between dark:border-zinc-800">
         <div className="pt-1">
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">Job search workspace</p>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-zinc-50">Good morning, {profile.name.split(" ")[0]}</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-zinc-50">Good morning, {profileRecord?.preferences.display_name.split(" ")[0] || "there"}</h1>
           <p className="mt-1 text-sm text-zinc-500">Set your details once, then review matches and decisions as they arrive.</p>
         </div>
         <div className="flex w-full flex-col items-stretch gap-2 sm:w-80 sm:items-end">
@@ -260,10 +330,10 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
             <div className="flex min-w-0 items-center gap-2">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><CircleUserRound className="h-4 w-4" /></span>
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5"><h2 className="text-xs font-semibold text-zinc-950 dark:text-zinc-50">Job profile</h2>{profileSaved ? <Badge className="border-0 bg-emerald-50 px-1.5 text-[9px] text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">Ready</Badge> : <Badge variant="secondary" className="px-1.5 text-[9px]">Needs review</Badge>}</div>
-                <p className="mt-0.5 truncate text-[10px] text-zinc-500">{profile.targetRoles}</p>
+                <div className="flex items-center gap-1.5"><h2 className="text-xs font-semibold text-zinc-950 dark:text-zinc-50">Job profile</h2>{profileRecord ? <Badge className="border-0 bg-emerald-50 px-1.5 text-[9px] text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">Ready</Badge> : <Badge variant="secondary" className="px-1.5 text-[9px]">Needs review</Badge>}</div>
+                <p className="mt-0.5 truncate text-[10px] text-zinc-500">{profileRecord?.preferences.target_titles.join(", ") || "Add your CV and job preferences"}</p>
               </div>
-              <Button size="sm" variant="outline" onClick={() => setProfileDialogOpen(true)} className="h-8 shrink-0 px-2.5 text-[10px]"><Pencil className="mr-1 h-3 w-3" />{profileSaved ? "Edit" : "Complete"}</Button>
+              <Button size="sm" variant="outline" onClick={() => setProfileDialogOpen(true)} className="h-8 shrink-0 px-2.5 text-[10px]"><Pencil className="mr-1 h-3 w-3" />{profileRecord ? "Edit" : "Complete"}</Button>
             </div>
           </Card>
         </div>
@@ -277,49 +347,55 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 pb-6 touch-pan-y">
             <section>
-              <div className="mb-3 flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">1</span><div><h3 className="text-sm font-semibold">Add your CV details</h3><p className="text-xs text-zinc-500">Import a PDF or enter the core fields yourself.</p></div></div>
+              <div className="mb-3 flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">1</span><div><h3 className="text-sm font-semibold">Add your CV details</h3><p className="text-xs text-zinc-500">Import a CV or review your saved details manually.</p></div></div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <button type="button" onClick={() => setSetupMode("pdf")} className={cn("rounded-xl border p-4 text-left transition-colors", setupMode === "pdf" ? "border-indigo-500 bg-indigo-50/60 ring-2 ring-indigo-500/10 dark:bg-indigo-950/20" : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800")}>
-                  <span className="flex items-center gap-2 text-sm font-semibold"><UploadCloud className="h-4 w-4 text-indigo-600" />Extract from PDF CV</span><span className="mt-1 block text-xs leading-relaxed text-zinc-500">We pull out your name, email, location, roles, skills, education, and experience.</span>
+                  <span className="flex items-center gap-2 text-sm font-semibold"><UploadCloud className="h-4 w-4 text-indigo-600" />Extract from CV</span><span className="mt-1 block text-xs leading-relaxed text-zinc-500">Athena extracts and merges facts into your master profile.</span>
                 </button>
                 <button type="button" onClick={() => setSetupMode("manual")} className={cn("rounded-xl border p-4 text-left transition-colors", setupMode === "manual" ? "border-indigo-500 bg-indigo-50/60 ring-2 ring-indigo-500/10 dark:bg-indigo-950/20" : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800")}>
-                  <span className="flex items-center gap-2 text-sm font-semibold"><Pencil className="h-4 w-4 text-indigo-600" />Enter details manually</span><span className="mt-1 block text-xs leading-relaxed text-zinc-500">Start with the essentials now. You can add education and experience later.</span>
+                  <span className="flex items-center gap-2 text-sm font-semibold"><Pencil className="h-4 w-4 text-indigo-600" />Edit saved details</span><span className="mt-1 block text-xs leading-relaxed text-zinc-500">Update your identity and job preferences without changing CV evidence.</span>
                 </button>
               </div>
 
               {setupMode === "pdf" && (
                 <div className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center dark:border-zinc-700 dark:bg-zinc-950/30">
-                  <input id="profile-cv-upload" type="file" accept="application/pdf,.pdf" onChange={handleCVUpload} className="sr-only" />
-                  {importStatus === "extracting" ? <><LoaderCircle className="mx-auto h-6 w-6 animate-spin text-indigo-600" /><p className="mt-2 text-sm font-semibold">Extracting core fields…</p><p className="mt-1 text-xs text-zinc-500">{uploadedFileName}</p></> : importStatus === "ready" ? <><span className="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Check className="h-4 w-4" /></span><p className="mt-2 text-sm font-semibold">CV fields extracted</p><p className="mt-1 text-xs text-zinc-500">Review the details below before saving.</p><label htmlFor="profile-cv-upload" className="mt-3 inline-block cursor-pointer text-xs font-semibold text-indigo-600 hover:underline">Choose a different PDF</label></> : <><UploadCloud className="mx-auto h-6 w-6 text-zinc-400" /><p className="mt-2 text-sm font-semibold">Upload your current CV</p><p className="mt-1 text-xs text-zinc-500">PDF only · Your extracted fields remain editable</p><label htmlFor="profile-cv-upload" className="mt-3 inline-flex h-9 cursor-pointer items-center rounded-lg bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700">Choose PDF</label></>}
+                  <input id="profile-cv-upload" type="file" accept="application/pdf,text/plain,.pdf,.txt" onChange={(event) => void handleProfileCVUpload(event)} className="sr-only" />
+                  {importStatus === "extracting" ? <><LoaderCircle className="mx-auto h-6 w-6 animate-spin text-indigo-600" /><p className="mt-2 text-sm font-semibold">Extracting and merging CV facts…</p><p className="mt-1 text-xs text-zinc-500">{uploadedFileName}</p></> : importStatus === "ready" ? <><span className="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><Check className="h-4 w-4" /></span><p className="mt-2 text-sm font-semibold">Master profile updated</p><p className="mt-1 text-xs text-zinc-500">Review your details below before saving preferences.</p><label htmlFor="profile-cv-upload" className="mt-3 inline-block cursor-pointer text-xs font-semibold text-indigo-600 hover:underline">Add another CV</label></> : <><UploadCloud className="mx-auto h-6 w-6 text-zinc-400" /><p className="mt-2 text-sm font-semibold">Upload a CV</p><p className="mt-1 text-xs text-zinc-500">PDF or TXT · Existing facts are preserved when new CVs merge</p><label htmlFor="profile-cv-upload" className="mt-3 inline-flex h-9 cursor-pointer items-center rounded-lg bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700">Choose file</label></>}
                 </div>
               )}
             </section>
 
             <section className="mt-6 border-t border-zinc-100 pt-5 dark:border-zinc-800">
-              <div className="mb-4 flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">2</span><div><h3 className="text-sm font-semibold">Review core fields</h3><p className="text-xs text-zinc-500">These fields power your job matches and CV drafts.</p></div></div>
+              <div className="mb-4 flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">2</span><div><h3 className="text-sm font-semibold">Review core fields</h3><p className="text-xs text-zinc-500">Personal details are editable; extracted skills stay evidence-backed.</p></div></div>
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <ProfileField label="Full name" value={profile.name} onChange={(value) => updateProfile("name", value)} />
-              <ProfileField label="Email for notifications" value={profile.email} onChange={(value) => updateProfile("email", value)} />
-              <ProfileField label="Location" value={profile.location} onChange={(value) => updateProfile("location", value)} />
-              <div className="sm:col-span-2 lg:col-span-3">
-                <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Skills and keywords</label>
-                <Textarea value={profile.skills} onChange={(event) => updateProfile("skills", event.target.value)} className="min-h-20 resize-y text-sm" />
+                <ProfileField label="Full name" value={profileForm.display_name} onChange={(display_name) => setProfileForm((current) => ({ ...current, display_name }))} />
+                <ProfileField label="Email for notifications" value={profileForm.email ?? ""} onChange={(email) => setProfileForm((current) => ({ ...current, email }))} />
+                <ProfileField label="Location" value={profileForm.current_location} onChange={(current_location) => setProfileForm((current) => ({ ...current, current_location }))} />
+                <ProfileField label="Current title" value={profileForm.current_title} onChange={(current_title) => setProfileForm((current) => ({ ...current, current_title }))} className="sm:col-span-2 lg:col-span-3" />
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Evidence-backed skills</label>
+                  <Textarea value={profileRecord?.master.skills.map((skill) => skill.name).join(", ") ?? ""} readOnly placeholder="Upload a CV to extract skills" className="min-h-20 resize-y bg-zinc-50 text-sm dark:bg-zinc-900" />
+                </div>
               </div>
-            </div>
             </section>
 
             <section className="mt-6 border-t border-zinc-100 pt-5 dark:border-zinc-800">
-              <div className="mb-4 flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">3</span><div><h3 className="text-sm font-semibold">Tell us your preferences</h3><p className="text-xs text-zinc-500">This is asked separately because it normally cannot be inferred from a CV.</p></div></div>
+              <div className="mb-4 flex items-center gap-2"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">3</span><div><h3 className="text-sm font-semibold">Tell us your preferences</h3><p className="text-xs text-zinc-500">Separate multiple roles, locations, or types with commas.</p></div></div>
               <div className="grid gap-4 sm:grid-cols-2">
-                <ProfileField label="Preferred roles" value={profile.targetRoles} onChange={(value) => updateProfile("targetRoles", value)} className="sm:col-span-2" />
-                <ProfileField label="Preferred location" value={profile.preferredLocation} onChange={(value) => updateProfile("preferredLocation", value)} />
-                <ProfileField label="Work mode" value={profile.workMode} onChange={(value) => updateProfile("workMode", value)} />
-                <ProfileField label="Seniority" value={profile.seniority} onChange={(value) => updateProfile("seniority", value)} />
+                <ProfileField label="Preferred roles" value={profileForm.target_titles.join(", ")} onChange={(value) => setProfileForm((current) => ({ ...current, target_titles: splitList(value) }))} className="sm:col-span-2" />
+                <ProfileField label="Preferred locations" value={profileForm.preferred_locations.join(", ")} onChange={(value) => setProfileForm((current) => ({ ...current, preferred_locations: splitList(value) }))} />
+                <ProfileChoices label="Work mode" options={["remote", "hybrid", "onsite"]} values={profileForm.work_modes} onChange={(work_modes) => setProfileForm((current) => ({ ...current, work_modes }))} />
+                <ProfileChoices label="Employment type" options={["internship", "graduate", "full-time", "contract"]} values={profileForm.employment_types} onChange={(employment_types) => setProfileForm((current) => ({ ...current, employment_types }))} />
+                <ProfileField label="Work authorization" value={profileForm.work_authorization} onChange={(work_authorization) => setProfileForm((current) => ({ ...current, work_authorization }))} />
+                <ProfileField label="Salary expectation" value={profileForm.salary_expectation} onChange={(salary_expectation) => setProfileForm((current) => ({ ...current, salary_expectation }))} />
               </div>
+              <label className="mt-4 flex cursor-pointer items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300"><input type="checkbox" checked={profileForm.willing_to_relocate} onChange={(event) => setProfileForm((current) => ({ ...current, willing_to_relocate: event.target.checked }))} className="h-4 w-4 rounded border-zinc-300 accent-indigo-600" />Open to relocation</label>
             </section>
+
+            {profileError && <div className="mt-5 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-400">{profileError}</div>}
             <div className="mt-5 flex items-center justify-between gap-3 border-t border-zinc-100 pt-5 dark:border-zinc-800">
-              <p className="text-xs text-zinc-500">Complete details produce better matches. You can add more later.</p>
-              <Button onClick={() => { setProfileSaved(true); setProfileDialogOpen(false); }} className="bg-indigo-600 text-white hover:bg-indigo-700"><Check className="mr-1.5 h-4 w-4" />Save profile</Button>
+              <p className="text-xs text-zinc-500">Your preferences never become unsupported CV claims.</p>
+              <Button disabled={profileSaving || importStatus === "extracting"} onClick={() => void saveJobProfile()} className="bg-indigo-600 text-white hover:bg-indigo-700">{profileSaving ? <LoaderCircle className="mr-1.5 h-4 w-4 animate-spin" /> : <Check className="mr-1.5 h-4 w-4" />}{profileSaving ? "Saving" : "Save profile"}</Button>
             </div>
           </div>
         </DialogContent>
@@ -421,6 +497,18 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
 
 function ProfileField({ label, value, onChange, className }: { label: string; value: string; onChange: (value: string) => void; className?: string }) {
   return <div className={className}><label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">{label}</label><Input value={value} onChange={(event) => onChange(event.target.value)} className="h-11 text-sm" /></div>;
+}
+
+function ProfileChoices<T extends string>({ label, options, values, onChange }: { label: string; options: readonly T[]; values: T[]; onChange: (values: T[]) => void }) {
+  return <div><p className="mb-1.5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">{label}</p><div className="flex min-h-11 flex-wrap items-center gap-1.5 rounded-lg border border-zinc-200 p-1.5 dark:border-zinc-800">{options.map((option) => { const selected = values.includes(option); return <button key={option} type="button" onClick={() => onChange(selected ? values.filter((value) => value !== option) : [...values, option])} className={cn("rounded-md px-2 py-1.5 text-[11px] font-semibold capitalize transition-colors", selected ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300")}>{option}</button>; })}</div></div>;
+}
+
+function splitList(value: string): string[] {
+  return value.split(",").map((item) => item.trimStart());
+}
+
+function cleanList(values: string[]): string[] {
+  return values.map((item) => item.trim()).filter(Boolean);
 }
 
 function MatchBadge({ score }: { score: number }) {

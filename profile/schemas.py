@@ -95,6 +95,7 @@ class MasterProfile(BaseModel):
 
 class CandidatePreferences(BaseModel):
     display_name: str = ""
+    email: str = ""
     current_title: str = ""
     current_location: str = ""
     target_titles: list[str] = Field(default_factory=list)

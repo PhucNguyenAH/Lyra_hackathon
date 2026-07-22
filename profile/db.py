@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from supabase import Client, create_client
 
-from profile.schemas import CVVariant, MasterProfile, ProfileRecord
+from profile.schemas import CandidatePreferences, CVVariant, MasterProfile, ProfileRecord
 
 
 PROFILES_TABLE = "profiles"
@@ -47,6 +47,9 @@ def _profile_record(row: Mapping[str, object]) -> ProfileRecord:
     payload["master"] = payload.get("master") or MasterProfile.empty().model_dump(
         mode="json"
     )
+    payload["preferences"] = payload.get("preferences") or CandidatePreferences().model_dump(
+        mode="json"
+    )
     return ProfileRecord.model_validate(payload)
 
 
@@ -54,7 +57,7 @@ def get_profile(profile_id: str) -> ProfileRecord:
     response = (
         _get_client()
         .table(PROFILES_TABLE)
-        .select("id,user_id,master,version")
+        .select("id,user_id,master,preferences,version")
         .eq("id", profile_id)
         .limit(1)
         .execute()
@@ -69,7 +72,7 @@ def get_or_create_profile(user_id: str) -> ProfileRecord:
     client = _get_client()
     response = (
         client.table(PROFILES_TABLE)
-        .select("id,user_id,master,version")
+        .select("id,user_id,master,preferences,version")
         .eq("user_id", user_id)
         .limit(1)
         .execute()
@@ -84,6 +87,7 @@ def get_or_create_profile(user_id: str) -> ProfileRecord:
             {
                 "user_id": user_id,
                 "master": MasterProfile.empty().model_dump(mode="json"),
+                "preferences": CandidatePreferences().model_dump(mode="json"),
                 "version": 1,
             }
         )
@@ -158,7 +162,7 @@ def get_master_for_user(user_id: str) -> ProfileRecord:
     response = (
         _get_client()
         .table(PROFILES_TABLE)
-        .select("id,user_id,master,version")
+        .select("id,user_id,master,preferences,version")
         .eq("user_id", user_id)
         .limit(1)
         .execute()
@@ -167,6 +171,47 @@ def get_master_for_user(user_id: str) -> ProfileRecord:
     if row is None:
         raise ProfileNotFoundError(user_id)
     return _profile_record(row)
+
+
+def save_preferences(
+    profile_id: str,
+    preferences: CandidatePreferences,
+) -> ProfileRecord:
+    response = (
+        _get_client()
+        .table(PROFILES_TABLE)
+        .update({"preferences": preferences.model_dump(mode="json")})
+        .eq("id", profile_id)
+        .execute()
+    )
+    row = _single_row(response.data)
+    if row is None:
+        raise ProfileNotFoundError(profile_id)
+    return _profile_record(row)
+
+
+def list_cv_uploads(profile_id: str) -> list[dict[str, str]]:
+    response = (
+        _get_client()
+        .table(CV_UPLOADS_TABLE)
+        .select("id,label,created_at")
+        .eq("profile_id", profile_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    rows = response.data if isinstance(response.data, list) else []
+    uploads: list[dict[str, str]] = []
+    for raw_row in rows:
+        if not isinstance(raw_row, Mapping):
+            continue
+        uploads.append(
+            {
+                "id": str(raw_row["id"]),
+                "label": str(raw_row.get("label") or "CV upload"),
+                "created_at": str(raw_row["created_at"]),
+            }
+        )
+    return uploads
 
 
 def get_application_jd(application_id: str) -> str:

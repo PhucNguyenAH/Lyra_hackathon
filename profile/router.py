@@ -15,11 +15,13 @@ from profile.db import (
     get_master_for_user,
     get_or_create_profile,
     get_profile,
+    list_cv_uploads,
     list_cv_variants,
     save_master,
+    save_preferences,
 )
 from profile.ingest import ingest_cv
-from profile.schemas import CVVariant, MasterProfile, ProfileRecord
+from profile.schemas import CandidatePreferences, CVVariant, MasterProfile, ProfileRecord
 from profile.tailor import TailorValidationError, tailor_cv
 
 
@@ -121,6 +123,29 @@ def update_profile(
         current = get_master_for_user(user_id)
         return save_master(current.id, master, current.version)
     except (ProfileNotFoundError, ProfileVersionConflictError) as error:
+        raise _profile_error(error) from error
+
+
+@router.patch(f"{API_PREFIX}/preferences", response_model=ProfileRecord)
+def update_preferences(
+    preferences: CandidatePreferences,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> ProfileRecord:
+    try:
+        profile = get_master_for_user(user_id)
+        return save_preferences(profile.id, preferences)
+    except ProfileNotFoundError as error:
+        raise _profile_error(error) from error
+
+
+@router.get(f"{API_PREFIX}/uploads")
+def read_cv_uploads(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> list[dict[str, str]]:
+    try:
+        profile = get_master_for_user(user_id)
+        return list_cv_uploads(profile.id)
+    except ProfileNotFoundError as error:
         raise _profile_error(error) from error
 
 

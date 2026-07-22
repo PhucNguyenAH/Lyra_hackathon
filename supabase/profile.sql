@@ -7,6 +7,7 @@ create table if not exists public.profiles (
     id         uuid primary key default gen_random_uuid(),
     user_id    uuid,
     master     jsonb not null default '{}'::jsonb,
+    preferences jsonb not null default '{}'::jsonb,
     version    integer not null default 1 check (version >= 1),
     updated_at timestamptz not null default now()
 );
@@ -69,6 +70,11 @@ alter table public.cv_variants enable row level security;
 revoke all on public.profiles from anon, authenticated;
 revoke all on public.cv_uploads from anon, authenticated;
 revoke all on public.cv_variants from anon, authenticated;
+
+
+-- Upgrade a profile table created before job-search preferences were added.
+alter table public.profiles
+    add column if not exists preferences jsonb not null default '{}'::jsonb;
 
 
 -- Upgrade an earlier cv_variants definition that predates staleness tracking.
