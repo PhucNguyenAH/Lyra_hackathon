@@ -1,199 +1,138 @@
-# Lyra Hackathon
+# Athena AI
 
-## Athena backend
+**An end-to-end AI job-application assistant.** Athena AI takes you from *finding* a
+role to *landing* it — discovering and scoring jobs, tailoring your CV, tracking
+every application, and practising interviews — with the tedious parts automated
+and the risky parts kept safe.
 
-The root FastAPI application serves the email and AI interview features:
+---
 
-```bash
-uvicorn server:app --reload --port 8008
-```
+## What it does
 
-Interactive API documentation is available at `http://localhost:8008/docs`.
+Athena AI follows the whole job hunt as one connected flow:
 
-### Create your branch
+1. **Discover** — scrape LinkedIn postings by title and location.
+2. **Match** — embed your resume and the jobs, rank them by relevance, and
+   filter/re-rank against your stated preferences (salary, work mode, must-have
+   skills, deal-breakers).
+3. **Tailor** — adapt your CV to a specific posting and keep versioned variants.
+4. **Apply & track** — maintain an application pipeline (scored → applied →
+   interview → offer / rejected) that updates itself.
+5. **Watch the inbox** — a Gmail watcher reads job-related emails, classifies
+   them (interview invite, rejection, offer…), and advances the matching
+   application automatically — only when it's confident.
+6. **Prepare** — practise interviews by job title with structured scoring and
+   post-session reports.
 
-```
-git switch -c <your-name>
-```
+The whole thing is driven from a single dashboard.
 
-### Push new commit
+---
 
-```
-git add .
-git commit -m "..."
-git push -u origin <your-branch>
-```
+## Features
 
-## Job scraper
-### Install environment
+### Job discovery & LinkedIn access
+- Scrapes LinkedIn job postings (title, company, location, posting date,
+  applicant count, full description).
+- **Log into LinkedIn from the web.** Instead of copying cookies, a real
+  browser runs server-side and is **streamed to your dashboard** (over VNC), so
+  you log in normally — including 2FA / CAPTCHA — from `/connect-linkedin`.
+- **Sessions are encrypted at rest** (Fernet) in Supabase, so a login survives
+  restarts and redeploys with no local file or volume.
+- A **connection badge** shows whether LinkedIn is connected; an expired session
+  is detected during scraping and prompts a one-click reconnect.
 
-Create and activate the conda env **before** installing or running anything.
-If you skip activation, `python`/`python3` may point at pyenv/system Python
-and packages won't be found.
+### Resume ↔ job matching
+- Embeds jobs and your resume with a Qwen3 embedding model and ranks them by
+  cosine similarity.
+- Turns a free-text description of what you want ("senior AI roles in Sydney,
+  remote, ≥160k, no crypto") into **structured expectations** used to exclude
+  deal-breakers and boost matches on skills, location, and work mode.
 
-If `conda: command not found`, initialize conda for your shell first:
+### CV tailoring & profile
+- User profiles, CV uploads, and tailored CV variants targeted at specific
+  postings.
 
-```
-source /opt/anaconda3/etc/profile.d/conda.sh
-conda activate hack
-```
+### Application pipeline + email watcher
+- A **deterministic pipeline** (not a free-roaming agent): every model output is
+  schema-validated and every status change follows a fixed transition table.
+- Watches a burner Gmail inbox, classifies each message with an LLM, fuzzy-matches
+  the company to an active application, and applies a status change **only when
+  classification and matching are both strong** — uncertain cases are routed to
+  human review rather than acted on.
 
-Then install (first time only):
+### AI interview practice
+- Generates interview questions by job title, scores answers on STAR structure
+  and relevance, and produces a session report.
 
-```
-conda create -n hack python=3.11   # skip if env already exists
-conda activate hack
-pip install -e .
-pip install -r requirements.txt
-python -m playwright install chromium
-```
+---
 
-Verify you're in the right env:
-
-```
-which python    # should show .../envs/hack/bin/python
-python -c "import playwright; print('ok')"
-```
-
-**Shortcut without conda activate** (works even if conda isn't in PATH):
-
-```
-/opt/anaconda3/envs/hack/bin/python create_session.py
-```
-
-### Create session
-
-With the `hack` env active (or use the full python path above):
-
-```
-python create_session.py
-```
-### Run job scraper
+## Architecture
 
 ```
-python misc/scrape_jobs.py
+                         ┌────────────────────────────┐
+                         │   Next.js dashboard (web)   │
+                         └──────────────┬─────────────┘
+                                        │
+                 ┌──────────────────────┴──────────────────────┐
+                 │                                              │
+      ┌──────────▼───────────┐                    ┌────────────▼────────────┐
+      │  Scraper API          │                    │  Athena backend          │
+      │  (FastAPI)            │                    │  (FastAPI)               │
+      │  • LinkedIn login     │                    │  • email watcher          │
+      │    (streamed browser) │                    │  • AI interview           │
+      │  • job scraping       │                    │  • profile / CV           │
+      │  • connection status  │                    │                          │
+      └──────────┬───────────┘                    └────────────┬────────────┘
+                 │                                              │
+                 └──────────────────┬───────────────────────────┘
+                                    │
+                         ┌──────────▼──────────┐        ┌─────────────────┐
+                         │      Supabase        │        │  LLM providers   │
+                         │  (Postgres datastore)│        │  Groq / Gemini / │
+                         └──────────────────────┘        │  OpenAI / vLLM   │
+                                                          └─────────────────┘
 ```
 
-## Embedding extractor
+- **Frontend** — a Next.js dashboard: jobs feed, application pipeline, CV editor,
+  interview practice, and LinkedIn connection.
+- **Two backends** — a scraping/LinkedIn service (Playwright + streamed login),
+  and the "Athena" server for email, interview, and profile features.
+- **Supabase** is the shared datastore. Core tables: `jobs`, `applications`,
+  `status_history`, `emails`, `needs_attention`, `prep_materials`,
+  `interview_sessions` / `interview_reports`, `profiles`, `cv_uploads` /
+  `cv_variants`, and `linkedin_sessions` (the encrypted LinkedIn session).
+- **LLMs** power classification, expectation extraction, and interview
+  generation — Groq for email intent, Gemini/OpenAI or a local vLLM model
+  elsewhere.
 
-`extractor.py` turns job postings and resumes into dense embeddings with
-[`Qwen/Qwen3-Embedding-0.6B`](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B)
-served via vLLM, and stores each item as a pickle file for resume↔job matching.
+### Design principles
+- **Deterministic where it matters.** The email → application-status automation
+  is a validated pipeline with a fixed transition table; ambiguous cases become
+  human-review items, never silent changes.
+- **Secrets stay server-side.** LinkedIn session cookies live encrypted in
+  Supabase and are never exposed to the browser; the dashboard only ever sees a
+  connection boolean.
 
-> Requires a GPU environment with `vllm` installed (see `requirements.txt`). The
-> first run downloads the ~1.2GB model from Hugging Face.
+---
 
-A single run embeds both the jobs and the resume, loading the model only once.
-Jobs are scraped from LinkedIn (title + location via args), embedded as
-*documents*, and written one pickle per job to `./job_embeddings/`. The resume
-PDF is embedded as a *query* (with Qwen3's retrieval instruction, the
-recommended asymmetric-search setup) to `./resume_embeddings/`.
+## Repository layout
 
-```
-python misc/extractor.py --title "AI engineer" --location "Sydney" --pdf resumes/resume.pdf
-```
+| Path | What lives there |
+|------|------------------|
+| `api/` | Scraper API + LinkedIn login flow (FastAPI) |
+| `linkedin_scraper/` | LinkedIn scraping library (Playwright) |
+| `email_services/` | Gmail watcher + application-status pipeline |
+| `interview/` | AI interview practice (questions, scoring, reports) |
+| `profile/` | Profiles and CV tailoring |
+| `misc/` | Standalone scripts (job scraping, embedding extractor) |
+| `matcher.py`, `expectations.py` | Resume↔job matching and preference extraction |
+| `server.py` | Athena backend entry point |
+| `front-end/` | Next.js dashboard |
+| `supabase_schema/` | Database schema (run in the Supabase SQL editor) |
 
-To re-embed without launching the browser, pass already-scraped jobs (Job
-schema, single object or list) as JSON instead of `--title`/`--location`:
+---
 
-```
-python misc/extractor.py --from-json jobs.json --pdf resumes/resume.pdf
-```
+## Running it
 
-Other flags: `--limit` (max jobs to scrape), `--session` (LinkedIn session
-file), `--job-out-dir` / `--resume-out-dir` (output dirs), `--model` (override
-the embedding model).
-
-### Pickle format
-Each `.pkl` holds one dict:
-
-```python
-{
-  "id": str,
-  "kind": "job" | "resume",
-  "source": str,              # linkedin_url or pdf path
-  "metadata": dict,           # job fields, or {"filename": ...}
-  "text": str,                # raw text that was embedded
-  "embedding": np.ndarray,    # float32
-  "model": "Qwen/Qwen3-Embedding-0.6B",
-  "dim": int,
-}
-```
-
-## User expectations
-
-`expectations.py` turns a free-text description of what you want in a job
-into a structured `expectations.json` that `matcher.py` can use for
-filtering and re-ranking. All backends use schema-constrained structured
-output, so the result always validates:
-
-- **openai** (default `gpt-4o-mini`): add `OPENAI_API_KEY=sk-...` to `.env`.
-  Runs anywhere, no GPU — but needs a funded/billed account (the free trial
-  quota tends to be exhausted quickly).
-- **gemini** (default `gemini-2.0-flash`): add `GEMINI_API_KEY=...` to
-  `.env`. Has a genuinely free tier — grab a key at
-  [aistudio.google.com/apikey](https://aistudio.google.com/apikey), no card
-  required. Good default for a hackathon.
-- **vllm** (local, default
-  [`Qwen/Qwen3-4B-Instruct-2507`](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507)):
-  same GPU environment as `extractor.py`, fully offline.
-
-The default `--backend auto` picks openai if `OPENAI_API_KEY` is set, else
-gemini if a Gemini key is set, else vllm.
-
-```
-python expectations.py --text "Senior AI roles in Sydney, remote only, \
-    min 160k AUD, must have Python and LLM experience, no crypto companies"
-
-# or from a file
-python expectations.py --file expectations.txt --out expectations.json
-
-# force a specific backend
-python expectations.py --backend gemini --text "..."
-python expectations.py --backend vllm --text "..."
-```
-
-It prints the extracted fields (salary_min, work_mode, seniority,
-must_have_skills, nice_to_have_skills, deal_breakers, locations, notes) so
-you can eyeball them — edit the JSON by hand if the extraction got something
-wrong. Flags: `--backend`, `--out`, `--model`, `--gpu-mem`, `--max-model-len`.
-
-## Job matcher
-
-`matcher.py` ranks the embedded jobs against the embedded resume by cosine
-similarity. It only needs numpy (no GPU/vLLM/browser), so run it any time
-after `extractor.py`:
-
-```
-python matcher.py
-
-# with structured expectations (see above)
-python matcher.py --expectations expectations.json
-```
-
-It prints the ranking and writes it to `matches.json`. Flags: `--job-dir` /
-`--resume-dir` (embedding dirs), `--out` (output JSON), `--top` (keep only the
-top N matches), `--expectations` (expectations JSON).
-
-With `--expectations`:
-
-- Jobs whose text contains a **deal-breaker** phrase are excluded from the
-  ranking; they still appear in the output under `"excluded"` with the
-  matched phrase.
-- The rest are re-ranked by `adjusted_score` = cosine + small boosts for
-  matched must-have skills, location, and work-mode mentions. Cosine remains
-  the dominant term.
-- Soft conflicts (e.g. remote wanted but the posting doesn't mention remote)
-  become `flags` warnings, not exclusions — LinkedIn text is too noisy to
-  hard-drop on the absence of a keyword.
-- `matches.json` becomes `{"matches": [...], "excluded": [...]}`, and each
-  match gains `adjusted_score`, `matched_must_haves`, `missing_must_haves`,
-  `matched` (positive signals: satisfied skills/location/work-mode/seniority/
-  salary criteria) and `flags` (warnings).
-
-> Salary limitation: `salary_min` is only checked when a salary figure can be
-> found in the posting text (regex). LinkedIn postings rarely list one, so
-> most jobs get a `"salary: unknown"` flag rather than a real comparison.
-
-> Note: raw cosine scores from the same search tend to cluster in a narrow
-> band — treat them as a ranking, not a "match %".
+Setup and run instructions live in **[`RUNNING.md`](RUNNING.md)**; deployment
+details for the scraper service are in **[`api/DEPLOY.md`](api/DEPLOY.md)**.
