@@ -6,8 +6,8 @@ from interview.llm import MAX_RETRIES, MODEL_NAME, MODEL_TEMPERATURE, Structured
 from interview.schemas import AnswerVerdict, NextMove, Topic, TopicState, TurnAnalysis
 
 
-MAX_FOLLOW_UPS_PER_TOPIC = 2
-MAX_HINTS_PER_TOPIC = 2
+MAX_FOLLOW_UPS_PER_TOPIC = 1
+MAX_HINTS_PER_TOPIC = 1
 
 TURN_PROMPT_TEMPLATE = """
 You are a senior engineer conducting a mock interview. You are rigorous but warm —
@@ -29,16 +29,30 @@ Analyze the candidate's latest answer and produce:
 - interviewer_message: what you say next, following the REQUIRED MOVE below.
 
 Choose the interviewer_message using these application-enforced rules:
-- vague with follow-ups remaining: ask ONE probing question aimed at weakest_point and quote
-  the candidate's words.
+- vague with follow-ups remaining: first react in ONE short, natural sentence to what the
+  candidate said (for example, "Right, so indexing did the heavy lifting there."). Then ask
+  ONE probing question aimed only at weakest_point. Never open with "You mentioned".
+  Never ask for both implementation and impact in the same turn. If the draft question
+  contains "and", cut everything after "and" so only one thing is being asked.
 - stuck with hints remaining: give hint #{hint_number}. Hint 1 rephrases the question
   concretely. Hint 2 gives a narrow nudge without revealing the answer.
 - solid, or the relevant quota is exhausted: acknowledge one specific thing they said, then
   transition to NEXT_TOPIC. If there is no NEXT_TOPIC, close the interview naturally.
 
 Never provide the full answer. Use 2-4 conversational sentences, with no bullet lists.
+
+Classification examples:
+- "We improved performance with caching and better queries" is vague: it contains claims
+  that are worth probing for implementation detail.
+- "I just used Supabase and a database index" is stuck: there is not enough substance to
+  drill into, so narrow or rephrase instead.
+- "Hmm", "uh", "I don't know", filler-only responses, and one-line non-answers to broad
+  questions are stuck, not vague.
+- If one follow-up has already failed to improve the answer, acknowledge what was said and
+  move on. Do not probe more deeply.
 {next_topic_line}
 {callback_line}
+{deescalation_line}
 """.strip()
 
 
@@ -55,10 +69,17 @@ def build_turn_prompt(
     topic: Topic,
     topic_state: TopicState,
     next_topic: Topic | None,
+    forced_verdict: AnswerVerdict | None = None,
 ) -> str:
     """Rebuild instructions from live counters on every answer."""
     callback = next_topic.callback if next_topic else None
-    return TURN_PROMPT_TEMPLATE.format(
+    deescalation = (
+        "YOUR LAST FOLLOW-UP DID NOT LAND. Do not probe deeper. Briefly acknowledge what "
+        "the candidate managed to say, then move to NEXT_TOPIC."
+        if topic_state.followup_count >= MAX_FOLLOW_UPS_PER_TOPIC
+        else ""
+    )
+    prompt = TURN_PROMPT_TEMPLATE.format(
         topic_title=topic.title,
         good_answer_criteria="\n".join(f"- {criterion}" for criterion in topic.what_good_looks_like),
         followups_remaining=MAX_FOLLOW_UPS_PER_TOPIC - topic_state.followup_count,
@@ -68,7 +89,11 @@ def build_turn_prompt(
         callback_line=(
             f"WHEN TRANSITIONING, OPEN WITH THIS CALLBACK: {callback}" if callback else ""
         ),
+        deescalation_line=deescalation,
     )
+    if forced_verdict is not None:
+        prompt += f"\nFORCED VERDICT: {forced_verdict.value}. Use the matching interviewer behavior."
+    return prompt
 
 
 def analyze(
@@ -77,10 +102,11 @@ def analyze(
     topic_state: TopicState,
     next_topic: Topic | None,
     client: StructuredClient | None = None,
+    forced_verdict: AnswerVerdict | None = None,
 ) -> tuple[TurnAnalysis, NextMove]:
     """Analyze in one model call, then independently enforce movement quotas in code."""
     llm = client or create_structured_client()
-    prompt = build_turn_prompt(topic, topic_state, next_topic)
+    prompt = build_turn_prompt(topic, topic_state, next_topic, forced_verdict)
     result = llm.chat.completions.create(
         model=MODEL_NAME,
         response_model=TurnAnalysis,
@@ -92,5 +118,8 @@ def analyze(
         max_retries=MAX_RETRIES,
     )
     analysis = cast(TurnAnalysis, result)
+    if forced_verdict is not None:
+        analysis.verdict = forced_verdict
+        analysis.weakest_point = None
     move = next_move(analysis.verdict, topic_state, next_topic is not None)
     return analysis, move

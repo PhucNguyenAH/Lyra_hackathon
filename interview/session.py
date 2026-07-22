@@ -8,6 +8,7 @@ from interview.evaluator import evaluate_session
 from interview.llm import StructuredClient
 from interview.question_gen import generate_topics
 from interview.schemas import (
+    AnswerVerdict,
     ChatMessage,
     FeedbackReport,
     InterviewSession,
@@ -16,6 +17,7 @@ from interview.schemas import (
     SessionConfig,
     SessionStatus,
     TopicState,
+    TurnAnalysis,
     TurnRecord,
     WeakTopic,
 )
@@ -79,13 +81,26 @@ def create_session(
     db: Client,
     user_id: str,
     job_description: str | None,
+    cv_text: str | None = None,
+    role_level: str | None = None,
     llm_client: StructuredClient | None = None,
 ) -> InterviewSession:
     """Seed a session from the CV and most recent coaching weaknesses."""
-    cv_text = _load_cv_text(db, user_id)
+    candidate_cv = cv_text.strip() if cv_text else _load_cv_text(db, user_id)
     weak_topics = _load_recent_weak_topics(db, user_id)
-    topics = generate_topics(cv_text, job_description, weak_topics, llm_client)
-    config = SessionConfig(user_id=user_id, job_description=job_description, topics=topics)
+    topics = generate_topics(
+        candidate_cv,
+        job_description,
+        weak_topics,
+        role_level,
+        llm_client,
+    )
+    config = SessionConfig(
+        user_id=user_id,
+        job_description=job_description,
+        role_level=role_level,
+        topics=topics,
+    )
     first_topic = topics[0]
     opening = " ".join(part for part in (first_topic.callback, first_topic.opening_question) if part)
     state = InterviewState(
@@ -167,6 +182,76 @@ def mark_for_evaluation(db: Client, session_id: str) -> InterviewSession:
     session.status = SessionStatus.EVALUATING
     db.table(SESSIONS_TABLE).update({"status": session.status.value}).eq("id", session_id).execute()
     return session
+
+
+def skip_topic(db: Client, session_id: str) -> tuple[InterviewSession, str]:
+    """Honor an explicit candidate skip without spending follow-up or hint quota."""
+    session = load_session(db, session_id)
+    if session.status is not SessionStatus.ACTIVE:
+        raise InvalidSessionStateError("Only active sessions can skip a topic")
+    index = session.state.current_topic_index
+    if index >= len(session.config.topics):
+        raise InvalidSessionStateError("All interview topics are already complete")
+
+    session.state.topic_states[index].completed = True
+    session.state.current_topic_index += 1
+    if session.state.current_topic_index < len(session.config.topics):
+        next_topic = session.config.topics[session.state.current_topic_index]
+        message = " ".join(
+            part for part in (next_topic.callback, next_topic.opening_question) if part
+        )
+    else:
+        session.status = SessionStatus.EVALUATING
+        message = "That was the final topic. I’ll prepare your feedback report now."
+    session.state.messages.append(ChatMessage(role="interviewer", content=message))
+    db.table(SESSIONS_TABLE).update(
+        {"state": session.state.model_dump(mode="json"), "status": session.status.value}
+    ).eq("id", session_id).execute()
+    return session, message
+
+
+def timeout_topic(
+    db: Client,
+    session_id: str,
+    llm_client: StructuredClient | None = None,
+) -> tuple[InterviewSession, TurnAnalysis, NextMove]:
+    """React to candidate silence without recording fabricated candidate speech."""
+    session = load_session(db, session_id)
+    if session.status is not SessionStatus.ACTIVE:
+        raise InvalidSessionStateError("Only active sessions can handle inactivity")
+    index = session.state.current_topic_index
+    if index >= len(session.config.topics):
+        raise InvalidSessionStateError("All interview topics are already complete")
+
+    topic = session.config.topics[index]
+    topic_state = session.state.topic_states[index]
+    next_topic = session.config.topics[index + 1] if index + 1 < len(session.config.topics) else None
+    analysis, move = analyze(
+        "The candidate has remained silent and has not provided an answer.",
+        topic,
+        topic_state,
+        next_topic,
+        llm_client,
+        AnswerVerdict.STUCK,
+    )
+    topic_state.answer_count += 1
+    if move is NextMove.HINT:
+        topic_state.hint_count += 1
+    elif move is NextMove.FOLLOW_UP:
+        topic_state.followup_count += 1
+    else:
+        topic_state.completed = True
+        session.state.current_topic_index += 1
+    session.state.messages.append(
+        ChatMessage(role="interviewer", content=analysis.interviewer_message)
+    )
+    if move is NextMove.COMPLETE:
+        session.status = SessionStatus.EVALUATING
+
+    db.table(SESSIONS_TABLE).update(
+        {"state": session.state.model_dump(mode="json"), "status": session.status.value}
+    ).eq("id", session_id).execute()
+    return session, analysis, move
 
 
 def evaluate_and_save(db: Client, session_id: str, llm_client: StructuredClient | None = None) -> None:

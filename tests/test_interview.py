@@ -55,7 +55,7 @@ def test_next_move_enforces_followup_and_hint_quotas() -> None:
     assert next_move(AnswerVerdict.VAGUE, active, True) is NextMove.FOLLOW_UP
     assert next_move(AnswerVerdict.STUCK, active, True) is NextMove.HINT
 
-    exhausted = TopicState(topic_id="topic", followup_count=2, hint_count=2)
+    exhausted = TopicState(topic_id="topic", followup_count=1, hint_count=1)
     assert next_move(AnswerVerdict.VAGUE, exhausted, True) is NextMove.NEXT_TOPIC
     assert next_move(AnswerVerdict.STUCK, exhausted, False) is NextMove.COMPLETE
 
@@ -82,14 +82,33 @@ def test_analyze_uses_one_call_and_targets_vague_claim() -> None:
     assert move is NextMove.FOLLOW_UP
 
 
-def test_second_hint_prompt_narrows_without_revealing_answer() -> None:
+def test_hint_prompt_narrows_without_revealing_answer() -> None:
     prompt = build_turn_prompt(
         topic(),
-        TopicState(topic_id="api-caching", hint_count=1),
+        TopicState(topic_id="api-caching"),
         topic("next"),
     )
-    assert "hint #2" in prompt
+    assert "hint #1" in prompt
     assert "without revealing the answer" in prompt
+
+
+def test_turn_prompt_treats_fillers_as_stuck_and_forbids_double_questions() -> None:
+    prompt = build_turn_prompt(topic(), TopicState(topic_id="api-caching"), topic("next"))
+    assert '"Hmm"' in prompt
+    assert "stuck, not vague" in prompt
+    assert "aimed only at weakest_point" in prompt
+    assert 'Never open with "You mentioned"' in prompt
+    assert 'cut everything after "and"' in prompt
+
+
+def test_failed_followup_forces_deescalation_and_transition() -> None:
+    prompt = build_turn_prompt(
+        topic(),
+        TopicState(topic_id="api-caching", followup_count=1),
+        topic("next"),
+    )
+    assert "YOUR LAST FOLLOW-UP DID NOT LAND" in prompt
+    assert "Do not probe deeper" in prompt
 
 
 def test_transition_includes_next_topics_cross_session_callback() -> None:
@@ -111,10 +130,13 @@ def test_question_prompt_prioritizes_previous_weakness_and_cv() -> None:
         "Built a banking API at CloudCorp using Redis.",
         "Needs distributed caching experience.",
         [weak],
+        "Intern / junior",
     )
     assert "banking API at CloudCorp" in prompt
     assert "Quantifying impact" in prompt
     assert "topics 1-2 MUST target them" in prompt
+    assert "TARGET SENIORITY: Intern / junior" in prompt
+    assert "Do not challenge" in prompt
 
 
 def test_generate_topics_requests_structured_topic_list() -> None:

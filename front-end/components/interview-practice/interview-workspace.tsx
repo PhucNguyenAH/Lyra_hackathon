@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { InterviewChat, Message } from "./interview-chat";
 import { InterviewCoverage, TopicCoverage } from "./interview-coverage";
-import { InterviewScorecard, ScoreBreakdown } from "./interview-scorecard";
+import { ScoreBreakdown } from "./interview-scorecard";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,10 +24,48 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { HelpCircle, Star, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, AlertCircle, RefreshCw, Timer, ClipboardList } from "lucide-react";
+import { HelpCircle, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, Timer, ClipboardList, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CVDraft } from "../drafts-dashboard";
 import { CVData } from "../cv-editor/cv-pdf-preview";
+import {
+  answerInterview,
+  createInterview,
+  endInterview,
+  FeedbackReport,
+  getInterviewReport,
+  skipInterviewTopic,
+  timeoutInterviewTopic,
+} from "@/lib/interview-api";
+
+const CONFIGURED_USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
+const BROWSER_USER_ID_KEY = "lyra-interview-user-id";
+const REPORT_POLL_INTERVAL_MS = 1_500;
+const REPORT_POLL_ATTEMPTS = 40;
+const INACTIVITY_NUDGE_MS = 60_000;
+const INACTIVITY_HINT_MS = 180_000;
+const INACTIVITY_MOVE_MS = 300_000;
+
+const emptyScore: ScoreBreakdown = {
+  overall: 0,
+  situation: 0,
+  task: 0,
+  action: 0,
+  result: 0,
+  relevance: 0,
+  specificity: 0,
+  proseFeedback: "Feedback is generated when the interview ends.",
+  metricsPresent: false,
+};
+
+function getInterviewUserId(): string {
+  if (CONFIGURED_USER_ID) return CONFIGURED_USER_ID;
+  const existing = window.localStorage.getItem(BROWSER_USER_ID_KEY);
+  if (existing) return existing;
+  const generated = window.crypto.randomUUID();
+  window.localStorage.setItem(BROWSER_USER_ID_KEY, generated);
+  return generated;
+}
 
 interface InterviewWorkspaceProps {
   drafts: CVDraft[];
@@ -37,9 +75,12 @@ interface InterviewWorkspaceProps {
 
 export interface QARecord {
   id: string;
+  topicId?: string;
   question: string;
   answer: string;
   score: ScoreBreakdown;
+  whatWasMissing?: string;
+  strongerAnswer?: string;
 }
 
 export interface SessionRecord {
@@ -65,6 +106,24 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
   const [messages, setMessages] = useState<Message[]>([]);
   const [isInterviewerThinking, setIsInterviewerThinking] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [apiSessionId, setApiSessionId] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [reportSummary, setReportSummary] = useState<FeedbackReport | null>(null);
+  const [inactivityNotice, setInactivityNotice] = useState<string | null>(null);
+  const localIdCounter = useRef(0);
+  const inactivityStartedAtRef = useRef(0);
+  const inactivityStageRef = useRef<"idle" | "nudged" | "hinting" | "moving">("idle");
+  const autoHintRef = useRef<() => void>(() => undefined);
+  const autoMoveRef = useRef<() => void>(() => undefined);
+  const nextLocalId = (prefix: string) => {
+    localIdCounter.current += 1;
+    return `${prefix}-${localIdCounter.current}`;
+  };
+  const resetInactivityTimer = () => {
+    inactivityStartedAtRef.current = Date.now();
+    inactivityStageRef.current = "idle";
+    setInactivityNotice(null);
+  };
 
   // Active exam states
   const [showConfirmStart, setShowConfirmStart] = useState(false);
@@ -140,9 +199,9 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
 
   // Target mock jobs catalog
   const targetJobs = [
-    { id: "job-1", title: "Backend Engineer (Java / Spring Boot)", company: "InnovateTech Solutions" },
-    { id: "job-2", title: "Senior Frontend Architect", company: "Vercel Partner Studio" },
-    { id: "job-3", title: "AI Engineer & Full Stack developer", company: "CognitiveAgents Corp" },
+    { id: "job-1", title: "Backend Engineer (Java / Spring Boot)", company: "InnovateTech Solutions", description: "Build high-volume Java and Spring Boot APIs using PostgreSQL, Docker, AWS, CI/CD, and secure service design." },
+    { id: "job-2", title: "Senior Frontend Architect", company: "Vercel Partner Studio", description: "Lead Next.js, React, TypeScript, Tailwind CSS, web performance, caching, accessibility, and frontend architecture." },
+    { id: "job-3", title: "AI Engineer & Full Stack developer", company: "CognitiveAgents Corp", description: "Develop Python and FastAPI AI products with retrieval, vector databases, evaluation, React, Next.js, and Docker." },
   ];
 
   const activeJob = targetJobs.find((j) => j.id === selectedJobId) || targetJobs[1];
@@ -152,118 +211,176 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
     setShowConfirmStart(true);
   };
 
-  const startInterview = () => {
-    setShowConfirmStart(false);
-    setScreen("INTERVIEW");
-    setIsPaused(false);
-    setTimerSeconds(0);
-    onExamModeChange?.(true); // Toggle Fullscreen Exam Room
-
-    let initialText = "";
-
-    if (interviewMode === "general") {
-      if (generalTrack === "AI") {
-        initialText = "Hello! Welcome to your technical mock interview preparation session for general AI Engineering. We will evaluate your knowledge in AI agents, LangChain loops, and vector database indexing. Can you start by explaining how you design retrieval-augmented generation (RAG) pipelines and handle chunking?";
-      } else {
-        initialText = "Hello! Welcome to your technical mock interview preparation session for general Software Engineering (SWE). We will evaluate your core engineering background in APIs, concurrency hazards, and caching patterns. Can you start by explaining how you structure full-stack applications?";
-      }
-    } else {
-      const candidateName = activeCV?.fullName || "Candidate";
-      const firstCompany = activeCV?.experience?.[0]?.company || "previous employer";
-      const keyProject = activeCV && "projects" in activeCV 
-        ? (activeCV as any).projects?.[0]?.name 
-        : "academic projects";
-
-      initialText = `Hello ${candidateName}! Welcome to your technical mock interview for the ${activeJob.title} position at ${activeJob.company}. I've reviewed your customized resume, particularly your software work at ${firstCompany} and your project '${keyProject}'. Let's start with a core topic: can you describe how you architected state updates, dynamic data caching, or concurrent hazards in these systems?`;
+  const startInterview = async () => {
+    const firstDraftCV = drafts[0]?.id ? cvDatabase[drafts[0].id] : undefined;
+    const selectedCV = activeCV || firstDraftCV;
+    if (!selectedCV) {
+      toast.error("Select or import a CV before starting the interview.");
+      return;
     }
-
-    setMessages([
-      {
-        id: "msg-init",
-        sender: "interviewer",
-        text: initialText,
+    setIsStarting(true);
+    try {
+      const jobDescription = interviewMode === "tailored"
+        ? `${activeJob.title} at ${activeJob.company}. ${activeJob.description}`
+        : `General ${generalTrack === "AI" ? "AI engineering" : "software engineering"} interview practice.`;
+      const session = await createInterview(
+        getInterviewUserId(),
+        jobDescription,
+        JSON.stringify(selectedCV),
+        interviewMode === "tailored"
+          ? (drafts.find((draft) => draft.id === selectedDraftId)?.level || "Not specified")
+          : "Junior to mid-level practice"
+      );
+      setApiSessionId(session.id);
+      setTopics(session.config.topics.map((topic, index) => ({
+        id: topic.id,
+        name: topic.title,
+        status: index === 0 ? "active" as const : "pending" as const,
+        score: null,
+      })));
+      setMessages(session.state.messages.map((message, index) => ({
+        id: `session-${session.id}-${index}`,
+        sender: message.role,
+        text: message.content,
         timestamp: new Date(),
-      },
-    ]);
-    setTopics(initialTopics.map((t, idx) => (idx === 0 ? { ...t, status: "active" } : t)));
-    setAnsweredQuestions([]);
-    setActiveQAIdx(0);
+      })));
+      setAnsweredQuestions([]);
+      setReportSummary(null);
+      setActiveQAIdx(0);
+      setTimerSeconds(0);
+      setIsPaused(false);
+      setShowConfirmStart(false);
+      setScreen("INTERVIEW");
+      resetInactivityTimer();
+      onExamModeChange?.(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not start the AI interview");
+    } finally {
+      setIsStarting(false);
+    }
   };
 
-  const handleSendMessage = (text: string) => {
-    if (isPaused) return;
+  const reportScore = (value: number) => Math.round(value * 20);
 
-    const activeTopicIdx = topics.findIndex((t) => t.status === "active");
+  const finishWithReport = (report: FeedbackReport, evidence: QARecord[]) => {
+    const average = Math.round(Object.values(report.scores).reduce((sum, value) => sum + value, 0) * 5);
+    const records = report.per_topic.map((feedback, index) => {
+      const source = [...evidence].reverse().find((item) => item.topicId === feedback.topic_id);
+      const topic = topics.find((item) => item.id === feedback.topic_id);
+      return {
+        id: `report-${feedback.topic_id}`,
+        topicId: feedback.topic_id,
+        question: source?.question || topic?.name || `Topic ${index + 1}`,
+        answer: source?.answer || feedback.what_they_said,
+        score: {
+          overall: average,
+          situation: reportScore(report.scores.communication),
+          task: reportScore(report.scores.handling_pressure),
+          action: reportScore(report.scores.technical_depth),
+          result: reportScore(report.scores.specificity),
+          relevance: reportScore(report.scores.communication),
+          specificity: reportScore(report.scores.specificity),
+          proseFeedback: feedback.verdict_summary,
+          metricsPresent: /\d/.test(feedback.what_they_said),
+        },
+        whatWasMissing: feedback.what_was_missing,
+        strongerAnswer: feedback.stronger_answer,
+      } satisfies QARecord;
+    });
+    setReportSummary(report);
+    saveSessionToHistory(records);
+  };
+
+  const pollForReport = async (sessionId: string, evidence: QARecord[]) => {
+    for (let attempt = 0; attempt < REPORT_POLL_ATTEMPTS; attempt += 1) {
+      const result = await getInterviewReport(sessionId);
+      if (result.status === "completed" && result.report) {
+        finishWithReport(result.report, evidence);
+        return;
+      }
+      if (result.status === "failed") throw new Error("The interview report could not be generated.");
+      await new Promise((resolve) => window.setTimeout(resolve, REPORT_POLL_INTERVAL_MS));
+    }
+    throw new Error("The report is taking longer than expected. Please try again shortly.");
+  };
+
+  const handleSendMessage = async (text: string) => {
+    if (isPaused || isInterviewerThinking || !apiSessionId) return;
+    resetInactivityTimer();
+    const activeTopicIdx = topics.findIndex((topic) => topic.status === "active");
     const activeTopic = topics[activeTopicIdx];
-
-    const lastQuestionMsg = [...messages].reverse().find((m) => m.sender === "interviewer");
-    const questionText = lastQuestionMsg ? lastQuestionMsg.text : "Can you detail your technical decisions?";
-
+    const questionText = [...messages].reverse().find((message) => message.sender === "interviewer")?.text
+      || activeTopic?.name
+      || "Interview question";
     const candidateMsg: Message = {
-      id: `msg-cand-${Date.now()}`,
+      id: nextLocalId("msg-cand"),
       sender: "candidate",
       text,
       timestamp: new Date(),
     };
-
-    setMessages((prev) => {
-      if (prev.some((m) => m.id === candidateMsg.id || (m.text === text && m.sender === "candidate" && Date.now() - m.timestamp.getTime() < 500))) {
-        return prev;
-      }
-      return [...prev, candidateMsg];
-    });
+    const evidence: QARecord = {
+      id: nextLocalId("answer"),
+      topicId: activeTopic?.id,
+      question: questionText,
+      answer: text,
+      score: emptyScore,
+    };
+    const nextEvidence = [...answeredQuestions, evidence];
+    setMessages((previous) => [...previous, candidateMsg]);
+    setAnsweredQuestions(nextEvidence);
     setIsInterviewerThinking(true);
-
-    setTimeout(() => {
-      const mockResultScore: ScoreBreakdown = generateMockScore(activeTopicIdx, text);
-
-      const newAnswerRecord: QARecord = {
-        id: `record-${activeTopic.id}`,
-        question: questionText,
-        answer: text,
-        score: mockResultScore,
-      };
-      setAnsweredQuestions((prev) => {
-        if (prev.some((r) => r.id === newAnswerRecord.id)) return prev;
-        return [...prev, newAnswerRecord];
-      });
-
-      setTopics((prev) =>
-        prev.map((t, idx) => {
-          if (idx === activeTopicIdx) {
-            return { ...t, status: "completed", score: mockResultScore.overall };
-          }
-          if (idx === activeTopicIdx + 1) {
-            return { ...t, status: "active" };
-          }
-          return t;
-        })
-      );
-
-      const nextTopic = topics[activeTopicIdx + 1];
-      if (nextTopic) {
-        const nextQuestion = getNextQuestion(nextTopic.id);
-        const interviewerMsg: Message = {
-          id: `msg-int-${Date.now()}`,
-          sender: "interviewer",
-          text: `Got it. Let's move on to the next topic, which is ${nextTopic.name}: ${nextQuestion}`,
-          timestamp: new Date(),
-        };
-
-        setMessages((prev) => {
-          if (prev.some((m) => m.text === interviewerMsg.text && m.sender === "interviewer")) {
-            return prev;
-          }
-          return [...prev, interviewerMsg];
-        });
-      } else {
-        setTimeout(() => {
-          saveSessionToHistory([...answeredQuestions, newAnswerRecord]);
-        }, 1500);
+    try {
+      const result = await answerInterview(apiSessionId, text);
+      setMessages((previous) => [...previous, {
+        id: nextLocalId("msg-int"),
+        sender: "interviewer",
+        text: result.interviewer_message,
+        timestamp: new Date(),
+      }]);
+      resetInactivityTimer();
+      if (result.move === "next_topic" || result.move === "complete") {
+        setTopics((previous) => previous.map((topic, index) => {
+          if (index === activeTopicIdx) return { ...topic, status: "completed" as const };
+          if (result.move !== "complete" && index === activeTopicIdx + 1) return { ...topic, status: "active" as const };
+          return topic;
+        }));
       }
-
+      if (result.session_complete) await pollForReport(apiSessionId, nextEvidence);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not analyze your answer");
+    } finally {
       setIsInterviewerThinking(false);
-    }, 2000);
+    }
+  };
+
+  const handleSilentTimeout = async () => {
+    if (isPaused || isInterviewerThinking || !apiSessionId) return;
+    const activeTopicIdx = topics.findIndex((topic) => topic.status === "active");
+    setInactivityNotice(null);
+    setIsInterviewerThinking(true);
+    try {
+      const result = await timeoutInterviewTopic(apiSessionId);
+      setMessages((previous) => [...previous, {
+        id: nextLocalId("msg-timeout"),
+        sender: "interviewer",
+        text: result.interviewer_message,
+        timestamp: new Date(),
+      }]);
+      if (result.move === "next_topic" || result.move === "complete") {
+        setTopics((previous) => previous.map((topic, index) => {
+          if (index === activeTopicIdx) return { ...topic, status: "completed" as const };
+          if (result.move !== "complete" && index === activeTopicIdx + 1) return { ...topic, status: "active" as const };
+          return topic;
+        }));
+        resetInactivityTimer();
+      }
+      if (result.session_complete) await pollForReport(apiSessionId, answeredQuestions);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not request an automatic hint");
+      resetInactivityTimer();
+    } finally {
+      setIsInterviewerThinking(false);
+    }
   };
 
   const saveSessionToHistory = (records: QARecord[]) => {
@@ -294,64 +411,59 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
     setScreen("REPORT");
   };
 
-  const handleRequestHint = () => {
-    const activeTopicIdx = topics.findIndex((t) => t.status === "active");
-    const activeTopic = topics[activeTopicIdx] || topics[0];
+  const handleRequestHint = () => void handleSendMessage("I'm stuck — could you rephrase that or give me a hint?");
 
-    const hintMsg: Message = {
-      id: `msg-hint-${Date.now()}`,
-      sender: "interviewer",
-      text: `💡 [Hint Tip]: For ${activeTopic.name}, ensure your answer discusses exact design patterns, libraries, or numbers (e.g. Next.js cache APIs or 300k+ requests) to secure a higher STAR rating!`,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, hintMsg]);
-  };
-
-  const handleNextTopic = () => {
-    if (isInterviewerThinking) return;
+  const handleNextTopic = async () => {
+    if (isInterviewerThinking || !apiSessionId) return;
 
     const activeTopicIdx = topics.findIndex((topic) => topic.status === "active");
     const nextTopic = topics[activeTopicIdx + 1];
 
-    if (!nextTopic) {
-      toast.info("You are already on the final interview topic.");
-      return;
-    }
-
-    setTopics((prev) =>
-      prev.map((topic, index) => {
-        if (index === activeTopicIdx) return { ...topic, status: "completed" };
-        if (index === activeTopicIdx + 1) return { ...topic, status: "active" };
+    setIsInterviewerThinking(true);
+    try {
+      const result = await skipInterviewTopic(apiSessionId);
+      setTopics((previous) => previous.map((topic, index) => {
+        if (index === activeTopicIdx) return { ...topic, status: "completed" as const };
+        if (nextTopic && index === activeTopicIdx + 1) return { ...topic, status: "active" as const };
         return topic;
-      })
-    );
-
-    const interviewerMsg: Message = {
-      id: `msg-skip-${Date.now()}`,
-      sender: "interviewer",
-      text: `Let's move to ${nextTopic.name}: ${getNextQuestion(nextTopic.id)}`,
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, interviewerMsg]);
+      }));
+      setMessages((previous) => [...previous, { id: nextLocalId("msg-skip"), sender: "interviewer", text: result.interviewer_message, timestamp: new Date() }]);
+      resetInactivityTimer();
+      if (result.session_complete) await pollForReport(apiSessionId, answeredQuestions);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not skip this topic");
+    } finally {
+      setIsInterviewerThinking(false);
+    }
   };
 
-  const handleFinishEarly = () => {
+  const handleFinishEarly = async () => {
     if (answeredQuestions.length === 0) {
       toast.error("Please answer at least one question before terminating the mock round early.");
       return;
     }
-    saveSessionToHistory(answeredQuestions);
+    if (!apiSessionId) return;
+    setIsInterviewerThinking(true);
+    try {
+      await endInterview(apiSessionId);
+      await pollForReport(apiSessionId, answeredQuestions);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not finish the interview");
+    } finally {
+      setIsInterviewerThinking(false);
+    }
   };
 
   const handleQuitLoop = () => {
     onExamModeChange?.(false); // Exit fullscreen exam mode
+    setApiSessionId(null);
     setScreen("SETUP");
   };
 
   const handleViewPastSessionReport = (session: SessionRecord) => {
+    setReportSummary(null);
     setAnsweredQuestions(session.qa);
-    setTopics(initialTopics.map((t, idx) => {
+    setTopics(initialTopics.map((t) => {
       const qaMatch = session.qa.find((q) => q.id === `record-${t.id}`);
       return {
         ...t,
@@ -378,12 +490,41 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
 
   const practiceSelectedQuestion = () => {
     if (!activeQA) return;
-    setMessages([{ id: `retry-${activeQA.id}`, sender: "interviewer", text: activeQA.question, timestamp: new Date() }]);
-    setAnsweredQuestions([]);
-    setTimerSeconds(0);
-    setScreen("INTERVIEW");
-    onExamModeChange?.(true);
+    setScreen("SETUP");
+    toast.info("Start a new AI interview to practise this area with fresh follow-up questions.");
   };
+
+  useEffect(() => {
+    autoHintRef.current = () => void handleSilentTimeout();
+    autoMoveRef.current = () => void handleNextTopic();
+  });
+
+  useEffect(() => {
+    if (screen !== "INTERVIEW" || isPaused || !apiSessionId) return;
+    if (inactivityStartedAtRef.current === 0) inactivityStartedAtRef.current = Date.now();
+
+    const interval = window.setInterval(() => {
+      if (isInterviewerThinking) return;
+      const elapsed = Date.now() - inactivityStartedAtRef.current;
+
+      if (elapsed >= INACTIVITY_MOVE_MS && inactivityStageRef.current !== "moving") {
+        inactivityStageRef.current = "moving";
+        setInactivityNotice("No problem. Moving to the next topic...");
+        autoMoveRef.current();
+      } else if (
+        elapsed >= INACTIVITY_HINT_MS
+        && (inactivityStageRef.current === "idle" || inactivityStageRef.current === "nudged")
+      ) {
+        inactivityStageRef.current = "hinting";
+        autoHintRef.current();
+      } else if (elapsed >= INACTIVITY_NUDGE_MS && inactivityStageRef.current === "idle") {
+        inactivityStageRef.current = "nudged";
+        setInactivityNotice("Take your time. You can type, speak, or ask for a hint.");
+      }
+    }, 1_000);
+
+    return () => window.clearInterval(interval);
+  }, [apiSessionId, isInterviewerThinking, isPaused, screen]);
 
   return (
     <div className="flex-1 flex flex-col space-y-6">
@@ -426,7 +567,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
             )}
 
             <div className="pt-2 border-t border-zinc-200 text-[10px] leading-relaxed text-zinc-500 italic">
-              ⚠️ Note: This session runs in a fullscreen exam environment. You must complete or trigger "Finish Early" to exit back to the setup dashboard.
+              ⚠️ Note: This session runs in a fullscreen exam environment. You must complete or trigger &quot;Finish Early&quot; to exit back to the setup dashboard.
             </div>
           </div>
 
@@ -440,9 +581,10 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
             </Button>
             <Button
               onClick={startInterview}
+              disabled={isStarting}
               className="h-9 text-[11px] font-semibold bg-zinc-900 text-white hover:bg-zinc-800 shadow-none border-none"
             >
-              Begin Assessment
+              {isStarting ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Preparing CV-based questions...</> : "Begin Assessment"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -507,7 +649,9 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
                   <label className="font-semibold text-zinc-500">Select General Track</label>
                   <Select
                     value={generalTrack}
-                    onValueChange={(val) => setGeneralTrack(val as any)}
+                    onValueChange={(val) => {
+                      if (val === "SWE" || val === "AI") setGeneralTrack(val);
+                    }}
                   >
                     <SelectTrigger className="w-full h-9 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-none">
                       <SelectValue placeholder="Select track" />
@@ -595,7 +739,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
 
                     {session.cvName !== "N/A" && (
                       <div className="text-[9px] text-zinc-500 mt-2 italic truncate">
-                        CV: "{session.cvName}"
+                        CV: &quot;{session.cvName}&quot;
                       </div>
                     )}
 
@@ -629,7 +773,10 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
                 <p className="text-xs text-zinc-400 mt-1 max-w-xs">Your mock interview evaluation timer is suspended.</p>
               </div>
               <Button
-                onClick={() => setIsPaused(false)}
+                onClick={() => {
+                  setIsPaused(false);
+                  resetInactivityTimer();
+                }}
                 className="h-10 px-6 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-none border-none"
               >
                 <Play className="h-4 w-4 fill-zinc-900" />
@@ -672,6 +819,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
                 variant="outline"
                 size="sm"
                 onClick={handleRequestHint}
+                disabled={isInterviewerThinking}
                 className="h-9 text-[11px] border-zinc-250 hover:bg-zinc-100 flex items-center gap-1 px-3 font-semibold text-zinc-750 shadow-none"
               >
                 <HelpCircle className="h-3.5 w-3.5" /> Hint
@@ -719,6 +867,8 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
               messages={messages}
               onSendMessage={handleSendMessage}
               isInterviewerThinking={isInterviewerThinking}
+              inactivityNotice={inactivityNotice}
+              onInputActivity={resetInactivityTimer}
             />
           </div>
         </div>
@@ -748,6 +898,16 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
             </div>
           </div>
 
+          {reportSummary && (
+            <Card className="border-indigo-200 bg-indigo-50/50 shadow-none dark:border-indigo-900/60 dark:bg-indigo-950/20">
+              <CardContent className="p-5">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">AI coach summary</p>
+                <p className="mt-2 text-sm leading-relaxed text-zinc-800 dark:text-zinc-200">{reportSummary.overall}</p>
+                <p className="mt-3 text-xs font-semibold text-indigo-900 dark:text-indigo-200">Focus next: {reportSummary.one_thing}</p>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Question navigator and selected-answer coaching workspace */}
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
             
@@ -775,7 +935,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
                           Q{idx + 1}: {item.question}
                         </h4>
                         <p className="text-zinc-455 dark:text-zinc-555 line-clamp-2">
-                          Your response: "{item.answer}"
+                          Your response: &quot;{item.answer}&quot;
                         </p>
                       </div>
                       
@@ -806,18 +966,21 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
               </Card>
 
               <Card className="border-zinc-200 bg-white shadow-none dark:border-zinc-800 dark:bg-zinc-900">
-                <CardHeader className="pb-3"><CardTitle className="text-sm font-bold">STAR breakdown</CardTitle></CardHeader>
+                <CardHeader className="pb-3"><CardTitle className="text-sm font-bold">{reportSummary ? "AI evaluation" : "STAR breakdown"}</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-2 gap-x-5 gap-y-4 text-xs sm:grid-cols-4">
-                  {[["Situation", activeScore.situation], ["Task", activeScore.task], ["Action", activeScore.action], ["Result", activeScore.result]].map(([label, value]) => <div key={String(label)}><div className="mb-1.5 flex justify-between font-semibold"><span>{label}</span><span>{value}%</span></div><Progress value={Number(value)} className="h-1.5 bg-zinc-100 [&>div]:bg-zinc-800 dark:bg-zinc-800 dark:[&>div]:bg-zinc-200" /></div>)}
+                  {(reportSummary
+                    ? [["Specificity", reportScore(reportSummary.scores.specificity)], ["Technical depth", reportScore(reportSummary.scores.technical_depth)], ["Communication", reportScore(reportSummary.scores.communication)], ["Under pressure", reportScore(reportSummary.scores.handling_pressure)]]
+                    : [["Situation", activeScore.situation], ["Task", activeScore.task], ["Action", activeScore.action], ["Result", activeScore.result]]
+                  ).map(([label, value]) => <div key={String(label)}><div className="mb-1.5 flex justify-between font-semibold"><span>{label}</span><span>{value}%</span></div><Progress value={Number(value)} className="h-1.5 bg-zinc-100 [&>div]:bg-zinc-800 dark:bg-zinc-800 dark:[&>div]:bg-zinc-200" /></div>)}
                 </CardContent>
               </Card>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <section className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20"><h3 className="flex items-center gap-2 text-sm font-bold text-emerald-800 dark:text-emerald-300"><CheckCircle2 className="h-4 w-4" />What worked</h3><p className="mt-2 text-xs leading-relaxed text-emerald-900/75 dark:text-emerald-200/70">Your answer was relevant ({activeScore.relevance}%) and technically specific ({activeScore.specificity}%). {activeScore.metricsPresent ? "You supported it with measurable evidence." : "Your explanation stayed focused on the question."}</p></section>
-                <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20"><h3 className="flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300"><AlertTriangle className="h-4 w-4" />Improve next</h3><p className="mt-2 text-xs leading-relaxed text-amber-900/75 dark:text-amber-200/70">{activeScore.proseFeedback} Focus first on the lowest STAR area and make the result explicit.</p></section>
+                <section className="rounded-xl border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/60 dark:bg-amber-950/20"><h3 className="flex items-center gap-2 text-sm font-bold text-amber-800 dark:text-amber-300"><AlertTriangle className="h-4 w-4" />Improve next</h3><p className="mt-2 text-xs leading-relaxed text-amber-900/75 dark:text-amber-200/70">{activeQA?.whatWasMissing || activeScore.proseFeedback}</p></section>
               </div>
 
-              <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-5 dark:border-indigo-900/60 dark:bg-indigo-950/20"><h3 className="flex items-center gap-2 text-sm font-bold text-indigo-900 dark:text-indigo-200"><Sparkles className="h-4 w-4" />A stronger answer structure</h3><p className="mt-2 text-xs leading-relaxed text-indigo-900/75 dark:text-indigo-200/70">Start with one sentence of context and your responsibility. Explain the specific technical action you took, including the trade-off you considered. End with a measurable result and what you learned. Keep every claim grounded in your real experience.</p></section>
+              <section className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-5 dark:border-indigo-900/60 dark:bg-indigo-950/20"><h3 className="flex items-center gap-2 text-sm font-bold text-indigo-900 dark:text-indigo-200"><Sparkles className="h-4 w-4" />A stronger answer</h3><p className="mt-2 text-xs leading-relaxed text-indigo-900/75 dark:text-indigo-200/70">{activeQA?.strongerAnswer || "Start with one sentence of context and your responsibility. Explain the specific technical action and trade-off, then end with a measurable result grounded in your experience."}</p></section>
 
               <div className="flex flex-wrap gap-2"><Button onClick={practiceSelectedQuestion} className="bg-zinc-900 text-white hover:bg-zinc-800"><RotateCcw className="mr-1.5 h-4 w-4" />Practise this question again</Button><Button variant="outline" onClick={() => setScreen("SETUP")}>Start another interview</Button></div>
 
@@ -839,86 +1002,6 @@ const initialTopics: TopicCoverage[] = [
   { id: "topic-4", name: "UI Polish & Animation Mechanics", status: "pending", score: null },
   { id: "topic-5", name: "Contracts & Collaboration", status: "pending", score: null },
 ];
-
-function getNextQuestion(topicId: string): string {
-  switch (topicId) {
-    case "topic-2":
-      return "How do you organize your styling configuration in Tailwind v4, and what steps do you take to construct reusable custom layouts with shadcn components?";
-    case "topic-3":
-      return "Can you describe a scenario where you diagnosed a layout shift or low INP score on a web application? What specific Web API tools did you adjust to optimize the performance?";
-    case "topic-4":
-      return "For a highly interactive application, how do you handle complex overlay transitions (like popovers and dialogs) without breaking focus order? How would you implement a simple scroll-driven transition?";
-    case "topic-5":
-      return "How do you establish interface contracts with backend teammates when working on asynchronous APIs? Give an example of how you handle loading and error states.";
-    default:
-      return "Tell me about your latest client-side layout architectural challenges.";
-  }
-}
-
-function generateMockScore(topicIdx: number, candidateText: string): ScoreBreakdown {
-  const metricsPresent = /\d+%|\d+\s?engineers|\d+\s?years|\d+\s?ms/i.test(candidateText);
-
-  const mockFeedbacks = [
-    {
-      overall: 90,
-      situation: 95,
-      task: 90,
-      action: 85,
-      result: 90,
-      relevance: 95,
-      specificity: 90,
-      proseFeedback: "Excellent coverage of the React 19 concurrent features. Your explanation of server-side boundaries was clear, and you described the caching challenges using precise state terms.",
-    },
-    {
-      overall: 85,
-      situation: 80,
-      task: 90,
-      action: 85,
-      result: 85,
-      relevance: 90,
-      specificity: 80,
-      proseFeedback: "Good explanation of utility class organization in Tailwind v4. The structure was coherent, but you could emphasize how theme extension variables are declared inside CSS instead of tailwind.config.",
-    },
-    {
-      overall: 80,
-      situation: 85,
-      task: 80,
-      action: 75,
-      result: 80,
-      relevance: 85,
-      specificity: 80,
-      proseFeedback: "Clear description of Core Web Vitals diagnostics. The explanation of page speed variables was detailed, but try to cite specific diagnostic values (like ms delay in INP) next time.",
-    },
-    {
-      overall: 92,
-      situation: 95,
-      task: 90,
-      action: 95,
-      result: 90,
-      relevance: 95,
-      specificity: 90,
-      proseFeedback: "Very polished description of custom overlays. You correctly noted the overlay stack mechanics and how dialog tags focus containment helps accessibility.",
-    },
-    {
-      overall: 88,
-      situation: 90,
-      task: 85,
-      action: 90,
-      result: 85,
-      relevance: 90,
-      specificity: 85,
-      proseFeedback: "Outstanding collaboration description. You correctly outlined client-server data contracting and how API schemas are documented in typescript before implementation.",
-    },
-  ];
-
-  const currentFeedback = mockFeedbacks[topicIdx] || mockFeedbacks[0];
-
-  return {
-    ...currentFeedback,
-    metricsPresent,
-    overall: metricsPresent ? currentFeedback.overall : Math.max(70, currentFeedback.overall - 10),
-  };
-}
 
 const ArrowLeft = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className={className}>

@@ -107,6 +107,7 @@ class FeedbackReport(BaseModel):
 class SessionConfig(BaseModel):
     user_id: str
     job_description: str | None = None
+    role_level: str | None = None
     topics: list[Topic] = Field(min_length=6, max_length=8)
 
 
@@ -127,6 +128,8 @@ class InterviewSession(BaseModel):
 class CreateSessionRequest(BaseModel):
     user_id: str
     job_description: str | None = None
+    role_level: str | None = Field(default=None, max_length=200)
+    cv_text: str | None = Field(default=None, min_length=1, max_length=100_000)
 
 
 class AnswerRequest(BaseModel):
@@ -137,6 +140,11 @@ class AnswerResponse(BaseModel):
     interviewer_message: str
     verdict: AnswerVerdict
     move: NextMove
+    session_complete: bool
+
+
+class SkipResponse(BaseModel):
+    interviewer_message: str
     session_complete: bool
 
 

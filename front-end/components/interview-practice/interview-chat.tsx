@@ -20,6 +20,8 @@ interface InterviewChatProps {
   onSendMessage: (text: string) => void;
   isInterviewerThinking: boolean;
   interviewerName?: string;
+  inactivityNotice?: string | null;
+  onInputActivity?: () => void;
 }
 
 interface SpeechRecognitionResultEventLike extends Event {
@@ -57,6 +59,8 @@ export function InterviewChat({
   onSendMessage,
   isInterviewerThinking,
   interviewerName = "Alex — Technical Interviewer",
+  inactivityNotice,
+  onInputActivity,
 }: InterviewChatProps) {
   const [inputText, setInputText] = useState("");
   const [isRecording, setIsRecording] = useState(false);
@@ -163,6 +167,7 @@ export function InterviewChat({
       ]
         .filter(Boolean)
         .join(" ");
+      onInputActivity?.();
       setInputText(combinedTranscript);
     };
 
@@ -343,6 +348,12 @@ export function InterviewChat({
           </p>
         )}
 
+        {inactivityNotice && (
+          <p role="status" className="w-full text-xs text-amber-700 dark:text-amber-300">
+            {inactivityNotice}
+          </p>
+        )}
+
         <div className="flex w-full gap-2 items-end">
           {/* Micro Recording Button */}
           <Button
@@ -368,7 +379,10 @@ export function InterviewChat({
             <Textarea
               placeholder={isRecording ? "Speak now..." : "Type your answer here..."}
               value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
+              onChange={(e) => {
+                setInputText(e.target.value);
+                onInputActivity?.();
+              }}
               disabled={isRecording}
               aria-label="Your answer"
               className="min-h-[44px] max-h-[120px] py-2.5 px-3 pr-10 text-xs resize-none rounded-xl bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-indigo-500"
