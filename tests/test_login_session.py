@@ -110,6 +110,26 @@ async def test_second_start_while_active_raises():
     await m.cancel()
 
 
+async def test_start_launch_failure_resets_active_and_tears_down():
+    async def never(page):
+        await asyncio.sleep(3600)
+
+    class ExplodingBrowser(FakeBrowser):
+        async def start(self):
+            raise RuntimeError("no display")
+
+    exploding = ExplodingBrowser()
+    m, browser, vnc, _ = _manager(never, browser=exploding)
+    with pytest.raises(RuntimeError):
+        await m.start()
+    assert m.state == "error"
+    assert "no display" in m.status()["error"]
+    assert exploding.closed is True
+
+    with pytest.raises(RuntimeError):
+        await m.start()
+
+
 async def test_cancel_tears_down_and_sets_cancelled():
     async def never(page):
         await asyncio.sleep(3600)

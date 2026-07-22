@@ -43,12 +43,19 @@ class LoginSessionManager:
             self.state = "starting"
             self.error = None
             self.session_id = str(uuid.uuid4())
-        self._browser = self._browser_factory()
-        await self._browser.start()
-        await self._browser.page.goto(LOGIN_URL)
-        self._vnc = await self._vnc_starter()
-        self.state = "awaiting_login"
-        self._task = asyncio.create_task(self._run())
+        try:
+            self._browser = self._browser_factory()
+            await self._browser.start()
+            await self._browser.page.goto(LOGIN_URL)
+            self._vnc = await self._vnc_starter()
+            self.state = "awaiting_login"
+            self._task = asyncio.create_task(self._run())
+        except Exception as exc:
+            logger.exception("Failed to start login session")
+            await self._teardown()
+            self.state = "error"
+            self.error = str(exc)
+            raise
         return {"session_id": self.session_id, "state": self.state}
 
     async def _run(self) -> None:
