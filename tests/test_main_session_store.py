@@ -1,6 +1,5 @@
 """Startup loads from the session store; login persists through it."""
 import asyncio
-import os
 import pytest
 from unittest.mock import patch
 from fastapi.testclient import TestClient
@@ -9,29 +8,10 @@ pytestmark = pytest.mark.unit
 
 STATE = '{"cookies":[],"origins":[]}'
 
-# api.main's SESSION_FILE defaults to this relative path when
-# LINKEDIN_SESSION_FILE isn't set (as in these tests). _bootstrap_session_state
-# writes the resolved state back to it, so without isolation one test's write
-# would leak into the next. Back up/restore any real local dev artifact and
-# ensure a clean slate for each test.
-_DEFAULT_SESSION_FILE = "linkedin_session.json"
-
-
-@pytest.fixture(autouse=True)
-def _isolate_default_session_file():
-    backup = None
-    if os.path.exists(_DEFAULT_SESSION_FILE):
-        with open(_DEFAULT_SESSION_FILE) as fh:
-            backup = fh.read()
-        os.remove(_DEFAULT_SESSION_FILE)
-    try:
-        yield
-    finally:
-        if os.path.exists(_DEFAULT_SESSION_FILE):
-            os.remove(_DEFAULT_SESSION_FILE)
-        if backup is not None:
-            with open(_DEFAULT_SESSION_FILE, "w") as fh:
-                fh.write(backup)
+# Session-file isolation (redirecting api.main.SESSION_FILE to a per-test
+# temp path) is handled globally by the autouse `_isolate_session_file`
+# fixture in tests/conftest.py, which never touches the real repo-root
+# linkedin_session.json.
 
 
 class FakeBrowserManager:
