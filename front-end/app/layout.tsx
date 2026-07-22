@@ -29,7 +29,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-50 dark:bg-zinc-955 text-zinc-900 dark:text-zinc-50 font-sans transition-colors duration-300">
+      <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 font-sans">
         <TooltipProvider>
           {children}
           <Toaster position="top-center" richColors />

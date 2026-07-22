@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { FileText, MessageSquare, Briefcase, FolderKanban, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +21,11 @@ export function DashboardLayout({
 }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    window.localStorage.removeItem("theme");
+  }, []);
 
   const menuItems = [
     {
@@ -232,7 +236,6 @@ export function DashboardLayout({
                 Live Pipeline Simulation
               </div>
 
-              <ThemeToggle />
             </div>
           </header>
         )}
