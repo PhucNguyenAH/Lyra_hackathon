@@ -81,6 +81,24 @@ class MasterProfile(BaseModel):
     projects: list[Project] = Field(default_factory=list)
     education: list[str] = Field(default_factory=list)
 
+    @classmethod
+    def empty(cls) -> "MasterProfile":
+        """Give first uploads the same valid input contract as later merges."""
+        return cls(
+            summary="",
+            skills=[],
+            experiences=[],
+            projects=[],
+            education=[],
+        )
+
+
+class ProfileRecord(BaseModel):
+    id: str
+    user_id: str | None
+    master: MasterProfile
+    version: int
+
 
 class SelectedItem(BaseModel):
     item_id: str
