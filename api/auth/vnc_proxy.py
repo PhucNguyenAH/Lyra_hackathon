@@ -2,7 +2,7 @@
 import asyncio
 import logging
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import WebSocket
 
 from .token import check_ws_token
 
@@ -20,8 +20,10 @@ async def vnc_websocket(ws: WebSocket) -> None:
         return
     await ws.accept()
     try:
-        reader, writer = await asyncio.open_connection(VNC_HOST, VNC_PORT)
-    except OSError:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(VNC_HOST, VNC_PORT), timeout=10
+        )
+    except (OSError, asyncio.TimeoutError):
         logger.exception("Cannot reach x11vnc at %s:%s", VNC_HOST, VNC_PORT)
         await ws.close(code=1011)
         return
@@ -32,7 +34,7 @@ async def vnc_websocket(ws: WebSocket) -> None:
                 data = await ws.receive_bytes()
                 writer.write(data)
                 await writer.drain()
-        except (WebSocketDisconnect, RuntimeError):
+        except Exception:
             pass
 
     async def tcp_to_ws():
@@ -42,14 +44,24 @@ async def vnc_websocket(ws: WebSocket) -> None:
                 if not data:
                     break
                 await ws.send_bytes(data)
-        except (WebSocketDisconnect, RuntimeError, ConnectionError):
+        except Exception:
             pass
 
+    t1 = asyncio.create_task(ws_to_tcp())
+    t2 = asyncio.create_task(tcp_to_ws())
     try:
-        await asyncio.gather(ws_to_tcp(), tcp_to_ws())
+        await asyncio.wait({t1, t2}, return_when=asyncio.FIRST_COMPLETED)
+        for task in (t1, t2):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(t1, t2, return_exceptions=True)
     finally:
         writer.close()
         try:
             await writer.wait_closed()
+        except Exception:
+            pass
+        try:
+            await ws.close()
         except Exception:
             pass
