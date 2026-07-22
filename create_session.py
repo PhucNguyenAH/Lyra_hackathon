@@ -66,7 +66,7 @@ async def create_session():
         print(f"\nSession saved to: {session_path}")
         print("\nYou can now:")
         print("  - Run integration tests: pytest")
-        print("  - Run example scripts: python scrape_jobs.py")
+        print("  - Run example scripts: python misc/scrape_jobs.py")
         print("\nNote: Keep this file secure and don't commit it to git.")
         print("="*60 + "\n")
 

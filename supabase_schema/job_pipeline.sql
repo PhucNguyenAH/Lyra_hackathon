@@ -14,6 +14,17 @@ create type application_status as enum (
     'withdrawn'
 );
 
+-- Application status tracked directly on a job row.
+create type job_status as enum (
+    'not_applied',
+    'applied',
+    'interview',
+    'offer',
+    'rejected',
+    'accepted',
+    'withdrawn'
+);
+
 create type email_intent as enum (
     'interview_invite',
     'rejection',
@@ -44,6 +55,7 @@ create table jobs (
     description     text,
     score           numeric(4, 2),
     score_reasoning text,
+    job_status      job_status not null default 'not_applied',
     created_at      timestamptz not null default now(),
     constraint jobs_score_range check (score is null or score between 0 and 10)
 );

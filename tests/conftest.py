@@ -1,6 +1,7 @@
 """
 Pytest configuration and fixtures for linkedin_scraper tests.
 """
+import importlib
 import pytest
 import asyncio
 from pathlib import Path
@@ -10,6 +11,26 @@ from linkedin_scraper.callbacks import SilentCallback
 
 # Session file path
 SESSION_FILE = Path(__file__).parent.parent / "linkedin_session.json"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_session_file(tmp_path, monkeypatch):
+    """Never let a test read/write/delete the real repo-root linkedin_session.json.
+
+    Redirects api.main.SESSION_FILE (and the env var it derives from) to a
+    unique temp path for every test. Guarded so tests that don't import
+    api.main (e.g. plain linkedin_scraper tests) are unaffected and don't
+    trigger an unnecessary import of api.main.
+    """
+    session_path = str(tmp_path / "linkedin_session.json")
+    monkeypatch.setenv("LINKEDIN_SESSION_FILE", session_path)
+    try:
+        main = importlib.import_module("api.main")
+    except Exception:
+        yield
+        return
+    monkeypatch.setattr(main, "SESSION_FILE", session_path, raising=False)
+    yield
 
 
 @pytest.fixture(scope="session")

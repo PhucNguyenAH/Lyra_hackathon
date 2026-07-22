@@ -22,6 +22,11 @@ RUN pip install --no-cache-dir -r api/requirements.txt
 # guarantees the browser matching the installed Playwright version is present.
 RUN playwright install chromium
 
+# System packages for the interactive login stream (Xvfb display + VNC server).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        xvfb x11vnc fluxbox \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy only the backend source (see .dockerignore for what's excluded).
 COPY api/ ./api/
 COPY linkedin_scraper/ ./linkedin_scraper/
@@ -38,4 +43,6 @@ EXPOSE 8000
 # Bind $PORT when the platform injects one (Railway, Cloud Run, Heroku), else
 # default to 8000 (local `docker run`). `exec` keeps uvicorn as PID 1 so it
 # receives SIGTERM and shuts the browser down cleanly.
-CMD ["/bin/sh", "-c", "exec uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+CMD ["/app/entrypoint.sh"]
