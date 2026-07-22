@@ -6,16 +6,15 @@ from contextlib import asynccontextmanager
 
 logger = logging.getLogger("api.main")
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI
 
 from linkedin_scraper import wait_for_manual_login
 from linkedin_scraper.core.browser import BrowserManager
 
 from .auth.login_session import LoginSessionManager
 from .auth.routes import router as auth_router
-from .models import JobCreatedResponse, JobRequest, JobStatusResponse
+from .jobs import router as jobs_router
 from .scraper_session import ScraperSession
-from .scraper_worker import run_job
 from .store import JobStore
 
 # Path to the logged-in LinkedIn session file. Overridable so deployments can
@@ -108,32 +107,4 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Job Scraper API", lifespan=lifespan)
 app.include_router(auth_router)
-
-
-@app.post("/jobs", status_code=202, response_model=JobCreatedResponse)
-async def create_job(req: JobRequest, background: BackgroundTasks):
-    scraper = app.state.scraper
-    if not scraper.has_session:
-        raise HTTPException(
-            status_code=409,
-            detail="no LinkedIn session — open /connect-linkedin to log in",
-        )
-    job_id = app.state.store.create()
-    background.add_task(
-        run_job,
-        job_id,
-        req.title,
-        req.location,
-        store=app.state.store,
-        browser=scraper.browser,
-        semaphore=scraper.semaphore,
-    )
-    return {"job_id": job_id, "status": "pending"}
-
-
-@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
-async def get_job(job_id: str):
-    job = app.state.store.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail="job not found")
-    return job
+app.include_router(jobs_router)
