@@ -4,6 +4,7 @@ This index tracks key architectural and UI decisions made during the development
 
 | Date | Title | Type | Status |
 |------|-------|------|--------|
+| 2026-07-22 | Account Settings entry for LinkedIn connection | UI, CONTRACT | proposed |
 | 2026-07-20 | Minimalist Resumes Version Control Hub & Monitoring Dashboard | UI | accepted |
 | 2026-07-20 | Scrollable Target Jobs feed & Refreshed intervals | UI | accepted |
 | 2026-07-20 | Minimalist CV Uploader & Neutral Theme Audit | UI | accepted |
