@@ -21,7 +21,10 @@ export type ApiSession = {
     topics: ApiTopic[];
   };
   state: {
+    current_topic_index: number;
+    topic_states: Array<{ topic_id: string; followup_count: number; hint_count: number; answer_count: number; completed: boolean }>;
     messages: Array<{ role: "interviewer" | "candidate"; content: string }>;
+    turns: Array<{ topic_id: string; answer: string; analysis: { interviewer_message: string }; move: string }>;
   };
   status: "active" | "evaluating" | "completed" | "failed";
 };
@@ -98,6 +101,10 @@ export function createInterview(
       role_level: roleLevel,
     }),
   });
+}
+
+export function getInterviewSession(sessionId: string): Promise<ApiSession> {
+  return apiRequest<ApiSession>(`/interview/sessions/${sessionId}`);
 }
 
 export function answerInterview(sessionId: string, answer: string): Promise<AnswerResult> {

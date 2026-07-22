@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
 import { type JobPosting } from "@/components/jobs-dashboard";
@@ -12,8 +13,11 @@ import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 
 type TabId = "drafts" | "applications" | "cv-editor" | "interview";
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState<TabId>("drafts");
+export default function Home({ interviewSessionId }: { interviewSessionId?: string } = {}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const activeTab: TabId = pathname.startsWith("/applications") ? "applications" : pathname.startsWith("/cv-builder") ? "cv-editor" : pathname.startsWith("/interviews") ? "interview" : "drafts";
+  const setActiveTab = (tab: TabId) => router.push(tab === "applications" ? "/applications" : tab === "cv-editor" ? "/cv-builder" : tab === "interview" ? "/interviews" : "/");
   const [selectedDraftId, setSelectedDraftId] = useState<string>("");
   const [isExamMode, setIsExamMode] = useState(false);
   const [tailoringState, setTailoringState] = useState<{ job: JobPosting; phase: "analyzing" | "rewriting" | "ready" } | null>(null);
@@ -295,6 +299,8 @@ export default function Home() {
         <InterviewWorkspace
           drafts={drafts}
           cvDatabase={cvDatabase}
+          initialSessionId={interviewSessionId}
+          onSessionIdChange={(sessionId) => router.push(sessionId ? `/interviews/${sessionId}` : "/interviews")}
           onExamModeChange={(active) => setIsExamMode(active)}
         />
       )}

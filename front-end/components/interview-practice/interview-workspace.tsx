@@ -34,6 +34,7 @@ import {
   endInterview,
   FeedbackReport,
   getInterviewReport,
+  getInterviewSession,
   skipInterviewTopic,
   timeoutInterviewTopic,
 } from "@/lib/interview-api";
@@ -70,6 +71,8 @@ function getInterviewUserId(): string {
 interface InterviewWorkspaceProps {
   drafts: CVDraft[];
   cvDatabase: Record<string, CVData>;
+  initialSessionId?: string;
+  onSessionIdChange?: (sessionId: string | null) => void;
   onExamModeChange?: (active: boolean) => void;
 }
 
@@ -93,7 +96,7 @@ export interface SessionRecord {
   qa: QARecord[];
 }
 
-export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: InterviewWorkspaceProps) {
+export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSessionIdChange, onExamModeChange }: InterviewWorkspaceProps) {
   const [screen, setScreen] = useState<"SETUP" | "INTERVIEW" | "REPORT">("SETUP");
   
   // Choose between General vs. Job & CV Tailored
@@ -115,6 +118,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
   const inactivityStageRef = useRef<"idle" | "nudged" | "hinting" | "moving">("idle");
   const autoHintRef = useRef<() => void>(() => undefined);
   const autoMoveRef = useRef<() => void>(() => undefined);
+  const restoredSessionRef = useRef<string | null>(null);
   const nextLocalId = (prefix: string) => {
     localIdCounter.current += 1;
     return `${prefix}-${localIdCounter.current}`;
@@ -232,6 +236,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
           : "Junior to mid-level practice"
       );
       setApiSessionId(session.id);
+      onSessionIdChange?.(session.id);
       setTopics(session.config.topics.map((topic, index) => ({
         id: topic.id,
         name: topic.title,
@@ -411,6 +416,54 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
     setScreen("REPORT");
   };
 
+  useEffect(() => {
+    if (!initialSessionId || restoredSessionRef.current === initialSessionId) return;
+    restoredSessionRef.current = initialSessionId;
+    let active = true;
+    const restore = async () => {
+      setIsStarting(true);
+      try {
+        const session = await getInterviewSession(initialSessionId);
+        if (!active) return;
+        const evidence: QARecord[] = session.state.turns.map((turn, index) => ({
+          id: `restored-${index}`,
+          topicId: turn.topic_id,
+          question: session.config.topics.find((topic) => topic.id === turn.topic_id)?.title || "Interview question",
+          answer: turn.answer,
+          score: emptyScore,
+        }));
+        setApiSessionId(session.id);
+        setTopics(session.config.topics.map((topic, index) => ({
+          id: topic.id,
+          name: topic.title,
+          status: session.state.topic_states[index]?.completed ? "completed" : index === session.state.current_topic_index && session.status === "active" ? "active" : "pending",
+          score: null,
+        })));
+        setMessages(session.state.messages.map((message, index) => ({ id: `session-${session.id}-${index}`, sender: message.role, text: message.content, timestamp: new Date() })));
+        setAnsweredQuestions(evidence);
+        if (session.status === "active") {
+          setScreen("INTERVIEW");
+          resetInactivityTimer();
+          onExamModeChange?.(true);
+        } else {
+          const result = await getInterviewReport(session.id);
+          if (!active) return;
+          if (result.status === "completed" && result.report) finishWithReport(result.report, evidence);
+          else if (result.status === "evaluating") await pollForReport(session.id, evidence);
+          else throw new Error("This interview session could not be restored.");
+        }
+      } catch (error) {
+        if (active) toast.error(error instanceof Error ? error.message : "Could not restore this interview session");
+      } finally {
+        if (active) setIsStarting(false);
+      }
+    };
+    void restore();
+    return () => { active = false; };
+  // The route id is the restoration boundary; callbacks intentionally use the current render state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSessionId]);
+
   const handleRequestHint = () => void handleSendMessage("I'm stuck — could you rephrase that or give me a hint?");
 
   const handleNextTopic = async () => {
@@ -458,6 +511,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, onExamModeChange }: Int
     onExamModeChange?.(false); // Exit fullscreen exam mode
     setApiSessionId(null);
     setScreen("SETUP");
+    onSessionIdChange?.(null);
   };
 
   const handleViewPastSessionReport = (session: SessionRecord) => {
