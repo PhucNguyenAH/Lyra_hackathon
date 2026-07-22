@@ -1,0 +1,171 @@
+const PROFILE_API_URL = (
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8008"
+).replace(/\/$/, "");
+
+const PROFILE_API_TIMEOUT_MS = 180_000;
+
+export type RoleFlavor =
+  | "backend"
+  | "frontend"
+  | "fullstack"
+  | "ai"
+  | "ml"
+  | "data"
+  | "devops"
+  | "cloud"
+  | "quant"
+  | "mobile"
+  | "security"
+  | "platform";
+
+export type ProfileSkill = {
+  name: string;
+  evidence: string[];
+};
+
+export type ProfileExperience = {
+  id: string;
+  role: string;
+  org: string;
+  period: string | null;
+  bullets: string[];
+  tech: string[];
+  role_flavors: RoleFlavor[];
+};
+
+export type ProfileProject = {
+  id: string;
+  name: string;
+  description: string;
+  bullets: string[];
+  tech: string[];
+  role_flavors: RoleFlavor[];
+};
+
+export type MasterProfile = {
+  summary: string;
+  skills: ProfileSkill[];
+  experiences: ProfileExperience[];
+  projects: ProfileProject[];
+  education: string[];
+};
+
+export type CandidatePreferences = {
+  display_name: string;
+  email?: string;
+  current_title: string;
+  current_location: string;
+  target_titles: string[];
+  preferred_locations: string[];
+  work_modes: Array<"remote" | "hybrid" | "onsite">;
+  employment_types: Array<"internship" | "graduate" | "full-time" | "contract">;
+  willing_to_relocate: boolean;
+  work_authorization: string;
+  salary_expectation: string;
+};
+
+export type ProfileRecord = {
+  id: string;
+  user_id: string | null;
+  master: MasterProfile;
+  preferences: CandidatePreferences;
+  version: number;
+};
+
+export type CVUploadRecord = {
+  id: string;
+  label: string;
+  created_at: string;
+};
+
+export class ProfileApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ProfileApiError";
+  }
+}
+
+async function profileRequest<T>(
+  path: string,
+  userId: string,
+  init?: RequestInit,
+): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${PROFILE_API_URL}${path}`, {
+      ...init,
+      headers: {
+        "X-User-ID": userId,
+        ...init?.headers,
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(PROFILE_API_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error("Profile processing timed out. Please try the upload again.");
+    }
+    throw new Error("Could not reach Athena Backend at http://localhost:8008.");
+  }
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string };
+    } | null;
+    const detail = payload?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail?.message ?? `Profile API request failed (${response.status})`;
+    throw new ProfileApiError(message, response.status);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+export function getProfile(userId: string): Promise<ProfileRecord> {
+  return profileRequest<ProfileRecord>("/profile", userId);
+}
+
+export function updatePreferences(
+  userId: string,
+  preferences: CandidatePreferences,
+): Promise<ProfileRecord> {
+  return profileRequest<ProfileRecord>("/profile/preferences", userId, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(preferences),
+  });
+}
+
+export function updateMasterProfile(
+  userId: string,
+  master: MasterProfile,
+): Promise<ProfileRecord> {
+  return profileRequest<ProfileRecord>("/profile", userId, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(master),
+  });
+}
+
+export function uploadCV(
+  userId: string,
+  file: File,
+  label: string,
+): Promise<ProfileRecord> {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("label", label);
+  return profileRequest<ProfileRecord>("/profile/upload", userId, {
+    method: "POST",
+    body,
+  });
+}
+
+export function getCVUploads(userId: string): Promise<CVUploadRecord[]> {
+  return profileRequest<CVUploadRecord[]>("/profile/uploads", userId);
+}
