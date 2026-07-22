@@ -93,7 +93,8 @@ def _make_on_saved(store, session_file, scraper):
     async def _on_saved():
         try:
             with open(session_file) as fh:
-                store.save(fh.read())
+                content = fh.read()
+            await asyncio.to_thread(store.save, content)
         except Exception:
             logger.exception("Failed to persist session to store")
         await scraper.reload_from_file()
