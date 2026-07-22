@@ -9,9 +9,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   type CandidatePreferences,
+  type MasterProfile,
   ProfileApiError,
   type ProfileRecord,
   getProfile,
+  updateMasterProfile,
   updatePreferences,
   uploadCV,
 } from "@/lib/profile-api";
@@ -30,10 +32,12 @@ import {
   Mail,
   MapPin,
   Pencil,
+  Plus,
   Search,
   Sparkles,
   UploadCloud,
   LoaderCircle,
+  Trash2,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -128,6 +132,8 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileRecord, setProfileRecord] = useState<ProfileRecord | null>(null);
   const [profileForm, setProfileForm] = useState<CandidatePreferences>(EMPTY_PROFILE_PREFERENCES);
+  const [masterForm, setMasterForm] = useState<MasterProfile | null>(null);
+  const [masterDirty, setMasterDirty] = useState(false);
   const [setupMode, setSetupMode] = useState<"pdf" | "manual">("pdf");
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<"idle" | "extracting" | "ready">("idle");
@@ -209,6 +215,8 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
         if (!active) return;
         setProfileRecord(savedProfile);
         setProfileForm(savedProfile.preferences);
+        setMasterForm(savedProfile.master);
+        setMasterDirty(false);
       })
       .catch((error: unknown) => {
         if (!active || (error instanceof ProfileApiError && error.status === 404)) return;
@@ -247,6 +255,8 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
       );
       setProfileRecord(savedProfile);
       setProfileForm(savedProfile.preferences);
+      setMasterForm(savedProfile.master);
+      setMasterDirty(false);
       setImportStatus("ready");
     } catch (error) {
       setImportStatus("idle");
@@ -263,6 +273,9 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
     setProfileSaving(true);
     setProfileError(null);
     try {
+      const masterSavedProfile = masterForm && masterDirty
+        ? await updateMasterProfile(PROFILE_USER_ID, masterForm)
+        : profileRecord;
       const savedProfile = await updatePreferences(PROFILE_USER_ID, {
         ...profileForm,
         target_titles: cleanList(profileForm.target_titles),
@@ -270,6 +283,8 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
       });
       setProfileRecord(savedProfile);
       setProfileForm(savedProfile.preferences);
+      setMasterForm(masterSavedProfile.master);
+      setMasterDirty(false);
       setProfileDialogOpen(false);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : "Could not save your profile.");
@@ -372,11 +387,12 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
                 <ProfileField label="Email for notifications" value={profileForm.email ?? ""} onChange={(email) => setProfileForm((current) => ({ ...current, email }))} />
                 <ProfileField label="Location" value={profileForm.current_location} onChange={(current_location) => setProfileForm((current) => ({ ...current, current_location }))} />
                 <ProfileField label="Current title" value={profileForm.current_title} onChange={(current_title) => setProfileForm((current) => ({ ...current, current_title }))} className="sm:col-span-2 lg:col-span-3" />
-                <div className="sm:col-span-2 lg:col-span-3">
-                  <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Evidence-backed skills</label>
-                  <Textarea value={profileRecord?.master.skills.map((skill) => skill.name).join(", ") ?? ""} readOnly placeholder="Upload a CV to extract skills" className="min-h-20 resize-y bg-zinc-50 text-sm dark:bg-zinc-900" />
-                </div>
               </div>
+              {masterForm ? (
+                <ExtractedFactsEditor master={masterForm} onChange={(nextMaster) => { setMasterForm(nextMaster); setMasterDirty(true); }} />
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-5 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900">Upload a CV to review its extracted experiences, projects, bullets, skills, and education.</div>
+              )}
             </section>
 
             <section className="mt-6 border-t border-zinc-100 pt-5 dark:border-zinc-800">
@@ -493,6 +509,59 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
       </div>
     </div>
   );
+}
+
+function ExtractedFactsEditor({ master, onChange }: { master: MasterProfile; onChange: (master: MasterProfile) => void }) {
+  const updateExperience = (index: number, changes: Partial<MasterProfile["experiences"][number]>) => onChange({ ...master, experiences: master.experiences.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) });
+  const updateProject = (index: number, changes: Partial<MasterProfile["projects"][number]>) => onChange({ ...master, projects: master.projects.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) });
+
+  return <div className="mt-5 space-y-5">
+    <div>
+      <label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Extracted summary</label>
+      <Textarea value={master.summary} onChange={(event) => onChange({ ...master, summary: event.target.value })} className="min-h-24 resize-y text-sm" />
+    </div>
+
+    <div>
+      <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Evidence-backed skills</p><span className="text-[10px] text-zinc-400">Remove anything extracted incorrectly</span></div>
+      <div className="flex min-h-12 flex-wrap gap-2 rounded-xl border border-zinc-200 p-3 dark:border-zinc-800">
+        {master.skills.map((skill) => <Badge key={skill.name} variant="secondary" className="h-7 gap-1.5 px-2.5">{skill.name}<button type="button" aria-label={`Remove ${skill.name}`} onClick={() => onChange({ ...master, skills: master.skills.filter((item) => item.name !== skill.name) })}><X className="h-3 w-3" /></button></Badge>)}
+        {master.skills.length === 0 && <span className="text-xs text-zinc-400">No skills extracted.</span>}
+      </div>
+    </div>
+
+    <div>
+      <div className="mb-2 flex items-center justify-between"><div><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Experiences</p><p className="text-[10px] text-zinc-400">Review every role and bullet Athena extracted.</p></div><Button type="button" size="sm" variant="outline" onClick={() => onChange({ ...master, experiences: [...master.experiences, { id: `exp-new-${Date.now()}`, role: "", org: "", period: null, bullets: [""], tech: [], role_flavors: [] }] })}><Plus className="h-3.5 w-3.5" />Add role</Button></div>
+      <div className="space-y-3">
+        {master.experiences.map((experience, index) => <div key={experience.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="mb-3 flex items-center justify-between gap-3"><code className="truncate text-[10px] text-zinc-400">{experience.id}</code><Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove ${experience.role}`} onClick={() => onChange({ ...master, experiences: master.experiences.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 className="h-3.5 w-3.5 text-rose-500" /></Button></div>
+          <div className="grid gap-3 sm:grid-cols-3"><ProfileField label="Role" value={experience.role} onChange={(role) => updateExperience(index, { role })} /><ProfileField label="Organization" value={experience.org} onChange={(org) => updateExperience(index, { org })} /><ProfileField label="Period" value={experience.period ?? ""} onChange={(period) => updateExperience(index, { period: period || null })} /></div>
+          <div className="mt-3"><ProfileField label="Technologies" value={experience.tech.join(", ")} onChange={(value) => updateExperience(index, { tech: splitList(value) })} /></div>
+          <div className="mt-3 space-y-2"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Bullets</p><Button type="button" size="xs" variant="ghost" onClick={() => updateExperience(index, { bullets: [...experience.bullets, ""] })}><Plus className="h-3 w-3" />Add bullet</Button></div>{experience.bullets.map((bullet, bulletIndex) => <div key={bulletIndex} className="flex items-start gap-2"><Textarea value={bullet} onChange={(event) => updateExperience(index, { bullets: experience.bullets.map((item, itemIndex) => itemIndex === bulletIndex ? event.target.value : item) })} className="min-h-20 resize-y text-sm" /><Button type="button" size="icon-sm" variant="ghost" aria-label="Remove bullet" onClick={() => updateExperience(index, { bullets: experience.bullets.filter((_, itemIndex) => itemIndex !== bulletIndex) })}><X className="h-3.5 w-3.5" /></Button></div>)}</div>
+          {experience.role_flavors.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{experience.role_flavors.map((flavor) => <Badge key={flavor} variant="outline" className="text-[10px]">{flavor}</Badge>)}</div>}
+        </div>)}
+        {master.experiences.length === 0 && <p className="rounded-xl bg-zinc-50 p-4 text-center text-xs text-zinc-500 dark:bg-zinc-900">No experiences extracted.</p>}
+      </div>
+    </div>
+
+    <div>
+      <div className="mb-2 flex items-center justify-between"><div><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Projects</p><p className="text-[10px] text-zinc-400">Keep only factual descriptions and supported bullets.</p></div><Button type="button" size="sm" variant="outline" onClick={() => onChange({ ...master, projects: [...master.projects, { id: `proj-new-${Date.now()}`, name: "", description: "", bullets: [""], tech: [], role_flavors: [] }] })}><Plus className="h-3.5 w-3.5" />Add project</Button></div>
+      <div className="space-y-3">
+        {master.projects.map((project, index) => <div key={project.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+          <div className="mb-3 flex items-center justify-between gap-3"><code className="truncate text-[10px] text-zinc-400">{project.id}</code><Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove ${project.name}`} onClick={() => onChange({ ...master, projects: master.projects.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 className="h-3.5 w-3.5 text-rose-500" /></Button></div>
+          <div className="grid gap-3 sm:grid-cols-2"><ProfileField label="Project name" value={project.name} onChange={(name) => updateProject(index, { name })} /><ProfileField label="Technologies" value={project.tech.join(", ")} onChange={(value) => updateProject(index, { tech: splitList(value) })} /></div>
+          <div className="mt-3"><label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Description</label><Textarea value={project.description} onChange={(event) => updateProject(index, { description: event.target.value })} className="min-h-16 resize-y text-sm" /></div>
+          <div className="mt-3 space-y-2"><div className="flex items-center justify-between"><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Bullets</p><Button type="button" size="xs" variant="ghost" onClick={() => updateProject(index, { bullets: [...project.bullets, ""] })}><Plus className="h-3 w-3" />Add bullet</Button></div>{project.bullets.map((bullet, bulletIndex) => <div key={bulletIndex} className="flex items-start gap-2"><Textarea value={bullet} onChange={(event) => updateProject(index, { bullets: project.bullets.map((item, itemIndex) => itemIndex === bulletIndex ? event.target.value : item) })} className="min-h-20 resize-y text-sm" /><Button type="button" size="icon-sm" variant="ghost" aria-label="Remove bullet" onClick={() => updateProject(index, { bullets: project.bullets.filter((_, itemIndex) => itemIndex !== bulletIndex) })}><X className="h-3.5 w-3.5" /></Button></div>)}</div>
+          {project.role_flavors.length > 0 && <div className="mt-3 flex flex-wrap gap-1.5">{project.role_flavors.map((flavor) => <Badge key={flavor} variant="outline" className="text-[10px]">{flavor}</Badge>)}</div>}
+        </div>)}
+        {master.projects.length === 0 && <p className="rounded-xl bg-zinc-50 p-4 text-center text-xs text-zinc-500 dark:bg-zinc-900">No projects extracted.</p>}
+      </div>
+    </div>
+
+    <div>
+      <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Education</p><Button type="button" size="xs" variant="ghost" onClick={() => onChange({ ...master, education: [...master.education, ""] })}><Plus className="h-3 w-3" />Add education</Button></div>
+      <div className="space-y-2">{master.education.map((education, index) => <div key={index} className="flex items-center gap-2"><Input value={education} onChange={(event) => onChange({ ...master, education: master.education.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} className="h-11" /><Button type="button" size="icon-sm" variant="ghost" aria-label="Remove education" onClick={() => onChange({ ...master, education: master.education.filter((_, itemIndex) => itemIndex !== index) })}><X className="h-3.5 w-3.5" /></Button></div>)}</div>
+    </div>
+  </div>;
 }
 
 function ProfileField({ label, value, onChange, className }: { label: string; value: string; onChange: (value: string) => void; className?: string }) {

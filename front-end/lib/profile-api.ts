@@ -141,6 +141,17 @@ export function updatePreferences(
   });
 }
 
+export function updateMasterProfile(
+  userId: string,
+  master: MasterProfile,
+): Promise<ProfileRecord> {
+  return profileRequest<ProfileRecord>("/profile", userId, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(master),
+  });
+}
+
 export function uploadCV(
   userId: string,
   file: File,

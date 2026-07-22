@@ -76,8 +76,8 @@ def configure_email_services(app: FastAPI) -> None:
         CORSMiddleware,
         allow_origins=[frontend_origin],
         allow_credentials=True,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_methods=["GET", "POST", "PATCH"],
+        allow_headers=["Content-Type", "X-User-ID"],
     )
     app.include_router(router)
 

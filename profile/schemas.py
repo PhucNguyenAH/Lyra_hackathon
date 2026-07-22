@@ -93,6 +93,16 @@ class MasterProfile(BaseModel):
         )
 
 
+class ExtractedCV(BaseModel):
+    """Keep CV identity hints separate from evidence used for tailoring."""
+
+    master: MasterProfile
+    display_name: str = ""
+    email: str = ""
+    current_title: str = ""
+    current_location: str = ""
+
+
 class CandidatePreferences(BaseModel):
     display_name: str = ""
     email: str = ""

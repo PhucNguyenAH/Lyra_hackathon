@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile, status
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from markitdown import MarkItDown, MarkItDownException
 
 from profile.db import (
     ProfileNotFoundError,
@@ -61,11 +60,14 @@ def _extract_upload_text(file: UploadFile) -> str:
 
     if suffix == ".pdf" and content_type == PDF_CONTENT_TYPE:
         try:
-            text = "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(payload)).pages)
-        except (PdfReadError, ValueError) as error:
+            text = MarkItDown(enable_plugins=False).convert_stream(
+                BytesIO(payload),
+                file_extension=".pdf",
+            ).text_content
+        except (MarkItDownException, ValueError) as error:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="The PDF could not be read",
+                detail="The PDF could not be converted to Markdown",
             ) from error
     elif suffix == ".txt" and content_type in TEXT_CONTENT_TYPES:
         try:

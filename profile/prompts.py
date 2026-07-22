@@ -6,12 +6,21 @@ EXTRACT_PROMPT = """You extract a candidate profile from one uploaded CV.
 UPLOADED CV (raw text):
 {cv_raw}
 
-Produce a standalone MasterProfile containing only facts supported by this CV.
-Rules:
+Produce an ExtractedCV containing identity fields plus a standalone master
+profile. Include only facts supported by this CV. Rules:
+
+IDENTITY:
+- display_name: copy the candidate's full name only when explicitly shown.
+- email: copy an email address only when explicitly shown.
+- current_title: copy the candidate's headline or current role only when
+  explicitly shown. Do not infer a title from skills, education, or projects.
+- current_location: copy a location only when explicitly associated with the
+  candidate. Do not use an employer, university, or project location.
+- Return an empty string for every missing identity field. Never guess.
 
 EXTRACTION:
 - Extract every experience, project, skill, and education item from the
-  CV. Preserve concrete details exactly: numbers, metrics, tech
+  CV into the master field. Preserve concrete details exactly: numbers, metrics, tech
   names, scale claims ("300,000+ requests"). Never round, never
   embellish, never invent.
 - Normalize skill names to lowercase canonical forms ("PostgreSQL",
@@ -30,8 +39,9 @@ TAGGING:
   appears. A skill with no evidence should not exist.
 
 SUMMARY:
-- 2-3 sentences, factual, no adjectives like "passionate" or
-  "results-driven". State what they build and with what."""
+- Copy a summary only when the CV contains an explicit summary, profile,
+  or about section. Preserve its factual wording. If the CV has no such
+  section, return an empty summary. Never synthesize one during extraction."""
 
 
 MERGE_PROMPT = """You maintain a candidate's master profile — the deduplicated superset of
@@ -65,8 +75,9 @@ EVIDENCE:
   skill actually appears. A skill with no evidence should not exist.
 
 SUMMARY:
-- Rewrite the summary to cover the merged profile in 2-3 factual sentences.
-  Use no adjectives like "passionate" or "results-driven"."""
+- Never synthesize a summary during merging. Preserve the current master's
+  explicit summary when it has one; otherwise use the extracted CV's explicit
+  summary. If neither input has one, return an empty summary."""
 
 
 TAILOR_PROMPT = """You are tailoring a CV for a specific job by SELECTING from the

@@ -9,9 +9,9 @@ from interview.llm import (
     MODEL_TEMPERATURE,
     create_structured_client,
 )
-from profile.db import get_profile, insert_cv_upload, save_master
+from profile.db import get_profile, insert_cv_upload, save_master, save_preferences
 from profile.prompts import EXTRACT_PROMPT, MERGE_PROMPT
-from profile.schemas import MasterProfile
+from profile.schemas import ExtractedCV, MasterProfile
 
 
 def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
@@ -23,10 +23,10 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
     client = create_structured_client()
 
     extracted = cast(
-        MasterProfile,
+        ExtractedCV,
         client.chat.completions.create(
             model=MODEL_NAME,
-            response_model=MasterProfile,
+            response_model=ExtractedCV,
             messages=[
                 {
                     "role": "system",
@@ -52,7 +52,7 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
                             ensure_ascii=False,
                         ),
                         extracted_json=json.dumps(
-                            extracted.model_dump(mode="json"),
+                            extracted.master.model_dump(mode="json"),
                             ensure_ascii=False,
                         ),
                     ),
@@ -67,11 +67,27 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
         profile_id=profile_id,
         raw_text=raw_text,
         label=label,
-        extracted=extracted,
+        extracted=extracted.master,
     )
     save_master(
         profile_id=profile_id,
         master=merged,
         expected_version=current.version,
     )
+    identity_updates = {
+        field: getattr(current.preferences, field) or getattr(extracted, field)
+        for field in (
+            "display_name",
+            "email",
+            "current_title",
+            "current_location",
+        )
+    }
+    if identity_updates != {
+        field: getattr(current.preferences, field) for field in identity_updates
+    }:
+        save_preferences(
+            profile_id=profile_id,
+            preferences=current.preferences.model_copy(update=identity_updates),
+        )
     return merged
