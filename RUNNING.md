@@ -1,4 +1,4 @@
-# Running Lyra locally
+# Running Athena AI locally
 
 The project has **three processes**: two backends + the Next.js frontend.
 

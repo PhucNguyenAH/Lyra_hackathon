@@ -1,6 +1,6 @@
-# Lyra
+# Athena AI
 
-**An end-to-end AI job-application assistant.** Lyra takes you from *finding* a
+**An end-to-end AI job-application assistant.** Athena AI takes you from *finding* a
 role to *landing* it — discovering and scoring jobs, tailoring your CV, tracking
 every application, and practising interviews — with the tedious parts automated
 and the risky parts kept safe.
@@ -9,7 +9,7 @@ and the risky parts kept safe.
 
 ## What it does
 
-Lyra follows the whole job hunt as one connected flow:
+Athena AI follows the whole job hunt as one connected flow:
 
 1. **Discover** — scrape LinkedIn postings by title and location.
 2. **Match** — embed your resume and the jobs, rank them by relevance, and
