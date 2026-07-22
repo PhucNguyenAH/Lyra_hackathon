@@ -55,7 +55,14 @@ def _materialize_session_file() -> None:
 
 
 async def _start_x11vnc():
-    """Start x11vnc against the Xvfb display, bound to localhost:5900."""
+    """Start x11vnc against the Xvfb display, bound to localhost:5900.
+
+    NOTE: `-nopw` means x11vnc itself performs no VNC-level authentication.
+    That's safe only because of `-localhost` (the port is unreachable from
+    outside the host) plus the token-gated proxy in vnc_proxy.py, which is
+    the only thing that ever connects to it. If this is ever changed to bind
+    a non-localhost address, add a VNC password (or equivalent auth) first.
+    """
     return await asyncio.create_subprocess_exec(
         "x11vnc", "-display", ":99", "-forever", "-shared",
         "-nopw", "-localhost", "-rfbport", "5900", "-quiet",

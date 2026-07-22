@@ -76,6 +76,7 @@ class LoginSessionManager:
             await self._teardown()
 
     async def cancel(self) -> None:
+        was_active = self._active
         if self._task and not self._task.done():
             self._task.cancel()
             try:
@@ -83,12 +84,22 @@ class LoginSessionManager:
             except (asyncio.CancelledError, Exception):
                 pass
         await self._teardown()
-        self.state = "cancelled"
+        if was_active:
+            self.state = "cancelled"
 
     async def _teardown(self) -> None:
         if self._vnc is not None:
             try:
                 self._vnc.terminate()
+                wait = getattr(self._vnc, "wait", None)
+                if callable(wait):
+                    try:
+                        await asyncio.wait_for(wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        self._vnc.kill()
+                        kill_wait = getattr(self._vnc, "wait", None)
+                        if callable(kill_wait):
+                            await kill_wait()
             except Exception:
                 logger.exception("Failed to terminate VNC")
             self._vnc = None

@@ -18,6 +18,10 @@ async def vnc_websocket(ws: WebSocket) -> None:
     if not check_ws_token(token):
         await ws.close(code=1008)  # policy violation
         return
+    login_manager = ws.app.state.login_manager
+    if login_manager.state != "awaiting_login":
+        await ws.close(code=1008)  # policy violation: no active login session
+        return
     await ws.accept()
     try:
         reader, writer = await asyncio.wait_for(

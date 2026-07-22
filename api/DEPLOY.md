@@ -160,6 +160,25 @@ Instead of pasting a session, an operator can create it from the web:
 5. On success the session is saved to the volume and the scraper hot-reloads;
    `/jobs` starts working immediately.
 
+### Front-end environment variables for the login page
+
+The `/connect-linkedin` page needs the front-end wired to the backend in two
+different ways, because HTTP and the VNC websocket are proxied differently:
+
+| Variable | Where | Purpose |
+|----------|-------|---------|
+| `BACKEND_URL` | Server-side (Vercel Project → Environment Variables, no `NEXT_PUBLIC_` prefix) | Used by the `next.config.ts` `rewrites()` so same-origin `/api/*` calls (`session/start`, `session/status`, `session/cancel`) proxy to the backend. |
+| `NEXT_PUBLIC_BACKEND_URL` | Public (bundled into the client, e.g. `https://<your-service>.up.railway.app`) | Used by the browser to open the VNC websocket **directly** against the backend, bypassing the Next.js rewrite. |
+
+**Why the VNC websocket connects directly instead of going through the `/api/*`
+rewrite:** Next.js rewrites are designed for HTTP requests and do not reliably
+forward WebSocket upgrade requests to an external host. Routing the `wss://`
+connection straight at the backend (derived from `NEXT_PUBLIC_BACKEND_URL`,
+`https`→`wss`/`http`→`ws`, path `/auth/session/vnc` — note: no `/api` prefix
+when going direct) avoids that failure mode. If `NEXT_PUBLIC_BACKEND_URL` is
+unset (e.g. local dev with both apps on the same origin via the rewrite), the
+page falls back to same-origin `/api/auth/session/vnc`.
+
 **Security:** the stream carries a live login (you type a password), so it must
 run over `wss` (TLS) — Railway/Vercel provide this. The admin token gates every
 route. `x11vnc` binds localhost and is only reachable through the token-gated
