@@ -1,6 +1,6 @@
 """Validated contracts keep profile facts traceable through ingestion and tailoring."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -93,10 +93,28 @@ class MasterProfile(BaseModel):
         )
 
 
+class CandidatePreferences(BaseModel):
+    display_name: str = ""
+    current_title: str = ""
+    current_location: str = ""
+    target_titles: list[str] = Field(default_factory=list)
+    preferred_locations: list[str] = Field(default_factory=list)
+    work_modes: list[Literal["remote", "hybrid", "onsite"]] = Field(
+        default_factory=list
+    )
+    employment_types: list[
+        Literal["internship", "graduate", "full-time", "contract"]
+    ] = Field(default_factory=list)
+    willing_to_relocate: bool = False
+    work_authorization: str = ""
+    salary_expectation: str = ""
+
+
 class ProfileRecord(BaseModel):
     id: str
     user_id: str | None
     master: MasterProfile
+    preferences: CandidatePreferences = Field(default_factory=CandidatePreferences)
     version: int
 
 

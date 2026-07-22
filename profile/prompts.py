@@ -1,36 +1,23 @@
 """Prompt contracts centralize the profile layer's factuality rules."""
 
 
-INGEST_PROMPT = """You maintain a candidate's master profile — the deduplicated superset of
-everything true about them across all their CV uploads.
+EXTRACT_PROMPT = """You extract a candidate profile from one uploaded CV.
 
-CURRENT MASTER PROFILE (may be empty on first upload):
-{master_json}
-
-NEWLY UPLOADED CV (raw text):
+UPLOADED CV (raw text):
 {cv_raw}
 
-Produce the updated master profile. Rules:
+Produce a standalone MasterProfile containing only facts supported by this CV.
+Rules:
 
 EXTRACTION:
 - Extract every experience, project, skill, and education item from the
-  new CV. Preserve concrete details exactly: numbers, metrics, tech
+  CV. Preserve concrete details exactly: numbers, metrics, tech
   names, scale claims ("300,000+ requests"). Never round, never
   embellish, never invent.
 - Normalize skill names to lowercase canonical forms ("PostgreSQL",
   "Postgres", "psql" → "postgresql"). Keep the candidate's original
   wording inside bullets untouched.
-
-MERGING:
-- Same role at the same organization = ONE experience. Union the
-  bullets. When two bullets describe the same fact, keep the more
-  specific/quantified one and drop the other.
-- Same project under different names or descriptions = ONE project;
-  merge the details.
-- NEVER remove a fact that exists in the current master unless it is a
-  duplicate of something you are keeping. Merges only add or dedupe.
-- Preserve existing item ids exactly. New items get new ids in the
-  pattern exp-{{org-slug}} / proj-{{name-slug}}.
+- Assign item ids in the pattern exp-{{org-slug}} / proj-{{name-slug}}.
 
 TAGGING:
 - Tag every experience and project with role_flavors it supports,
@@ -45,6 +32,41 @@ TAGGING:
 SUMMARY:
 - 2-3 sentences, factual, no adjectives like "passionate" or
   "results-driven". State what they build and with what."""
+
+
+MERGE_PROMPT = """You maintain a candidate's master profile — the deduplicated superset of
+everything true about them across all their CV uploads.
+
+CURRENT MASTER PROFILE (may be empty on first upload):
+{master_json}
+
+FACTS EXTRACTED FROM THE NEW UPLOAD:
+{extracted_json}
+
+Produce the updated master profile. Rules:
+
+MERGING:
+- Same role at the same organization = ONE experience. Union the
+  bullets. When two bullets describe the same fact, keep the more
+  specific/quantified one and drop the other.
+- Same project under different names or descriptions = ONE project;
+  merge the details.
+- NEVER remove a fact that exists in the current master unless it is a
+  duplicate of something you are keeping. Merges only add or dedupe.
+- Preserve existing item ids exactly. New items retain the ids assigned
+  during extraction in the pattern exp-{{org-slug}} / proj-{{name-slug}}.
+- Preserve concrete details exactly: numbers, metrics, technology names,
+  and scale claims. Never round, embellish, or invent.
+
+EVIDENCE:
+- Union role_flavors from duplicate items, using only: backend, frontend,
+  fullstack, ai, ml, data, devops, cloud, quant, mobile, security, platform.
+- Rebuild skills[].evidence so every entry names an item id where that
+  skill actually appears. A skill with no evidence should not exist.
+
+SUMMARY:
+- Rewrite the summary to cover the merged profile in 2-3 factual sentences.
+  Use no adjectives like "passionate" or "results-driven"."""
 
 
 TAILOR_PROMPT = """You are tailoring a CV for a specific job by SELECTING from the
