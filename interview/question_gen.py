@@ -4,7 +4,7 @@ import json
 from typing import cast
 
 from interview.llm import MAX_RETRIES, MODEL_NAME, MODEL_TEMPERATURE, StructuredClient, create_structured_client
-from interview.schemas import Topic, WeakTopic
+from interview.schemas import InterviewStage, Topic, WeakTopic
 
 
 QUESTION_PROMPT_TEMPLATE = """
@@ -14,19 +14,18 @@ CANDIDATE CV:
 {cv_text}
 
 TARGET SENIORITY: {role_level}
+INTERVIEW ROUND: {interview_stage}
 
 {job_section}
 {weakness_section}
 
-Generate 6-8 interview topics as JSON. Rules:
+Generate exactly 6 interview topics as JSON. Rules:
 - Every topic must be anchored in a SPECIFIC item from the CV. Never ask a generic
   "challenging project" question; name the candidate's real project, employer, or skill.
 - If previous weaknesses are provided, topics 1-2 MUST target them and include a callback
   field with a one-sentence opener such as "Last session you had trouble quantifying impact —
   let's work on that first."
-- Mix 2-3 behavioral topics anchored in CV projects and 3-4 technical topics anchored in
-  CV skills/stack. If a target role is provided, include 2 company-domain topics derived
-  from its actual requirements while still anchoring them in the CV.
+- Follow the ROUND FORMAT below exactly. Do not reuse the topic mix from another round.
 - Each topic has: id, type, title, opening_question, what_good_looks_like, and optional callback.
 - what_good_looks_like contains 2-3 concise criteria covering specifics, numbers, or trade-offs.
 - Match question and probing depth to TARGET SENIORITY. For interns, graduates, and junior
@@ -35,7 +34,34 @@ Generate 6-8 interview topics as JSON. Rules:
 - A large metric in the CV is evidence to discuss, not proof that a junior candidate personally
   designed the entire system behind it. Ask about their contribution and observations.
 - Use unique, stable kebab-case ids. Do not invent candidate experience.
+
+ROUND FORMAT:
+{round_rules}
 """.strip()
+
+
+ROUND_RULES = {
+    InterviewStage.PHONE_SCREEN: """
+You are a recruiter conducting a realistic 25-30 minute phone screen.
+- Topic order: brief introduction/career story; motivation for this company and role; one highly
+  relevant CV example; collaboration/communication; practical expectations such as availability
+  and work eligibility; candidate questions and close.
+- Keep questions broad and answerable in 60-120 seconds. Assess clarity, relevance, motivation,
+  and credible impact, not engineering depth.
+- Do not ask coding, system design, debugging, architecture, algorithms, syntax, or whiteboarding.
+  Do not turn a recruiter screen into a technical interview.
+""".strip(),
+    InterviewStage.EXPERIENCE_TECHNICAL: """
+You are an engineer conducting a 45-60 minute technical experience phone screen.
+- Topic order: technical introduction; two deep dives into role-relevant CV projects; debugging
+  or incident reasoning; one design/trade-off discussion grounded in their stack; validation,
+  testing, and measurable outcomes.
+- Test what the candidate personally built, why they chose an approach, alternatives considered,
+  failure modes, debugging steps, and results. Prefer concrete engineering follow-ups.
+- Do not ask recruiter logistics or generic motivation questions. Do not ask LeetCode, live coding,
+  take-home, or online-assessment questions. This is a spoken technical discussion.
+""".strip(),
+}
 
 
 def build_question_prompt(
@@ -43,6 +69,7 @@ def build_question_prompt(
     job_description: str | None,
     weak_topics: list[WeakTopic],
     role_level: str | None = None,
+    interview_stage: InterviewStage = InterviewStage.EXPERIENCE_TECHNICAL,
 ) -> str:
     job_section = (
         "TARGET ROLE (company domain questions must come from this JD):\n" + job_description
@@ -58,8 +85,10 @@ def build_question_prompt(
     return QUESTION_PROMPT_TEMPLATE.format(
         cv_text=cv_text,
         role_level=role_level or "Not specified; infer conservatively from the CV",
+        interview_stage=interview_stage.value,
         job_section=job_section,
         weakness_section=weakness_section,
+        round_rules=ROUND_RULES[interview_stage],
     )
 
 
@@ -68,13 +97,20 @@ def generate_topics(
     job_description: str | None = None,
     weak_topics: list[WeakTopic] | None = None,
     role_level: str | None = None,
+    interview_stage: InterviewStage = InterviewStage.EXPERIENCE_TECHNICAL,
     client: StructuredClient | None = None,
 ) -> list[Topic]:
     """Generate schema-validated topics grounded in persisted candidate evidence."""
     if not cv_text.strip():
         raise ValueError("A non-empty CV is required to generate interview topics")
     llm = client or create_structured_client()
-    prompt = build_question_prompt(cv_text, job_description, weak_topics or [], role_level)
+    prompt = build_question_prompt(
+        cv_text,
+        job_description,
+        weak_topics or [],
+        role_level,
+        interview_stage,
+    )
     result = llm.chat.completions.create(
         model=MODEL_NAME,
         response_model=list[Topic],

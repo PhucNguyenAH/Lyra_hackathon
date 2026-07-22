@@ -3,15 +3,14 @@
 from typing import cast
 
 from interview.llm import MAX_RETRIES, MODEL_NAME, MODEL_TEMPERATURE, StructuredClient, create_structured_client
-from interview.schemas import AnswerVerdict, NextMove, Topic, TopicState, TurnAnalysis
+from interview.schemas import AnswerVerdict, InterviewStage, NextMove, Topic, TopicState, TurnAnalysis
 
 
 MAX_FOLLOW_UPS_PER_TOPIC = 1
 MAX_HINTS_PER_TOPIC = 1
 
 TURN_PROMPT_TEMPLATE = """
-You are a senior engineer conducting a mock interview. You are rigorous but warm —
-you want the candidate to succeed by being pushed.
+{interviewer_persona}
 
 CURRENT TOPIC: {topic_title}
 WHAT A GOOD ANSWER COVERS:
@@ -70,6 +69,7 @@ def build_turn_prompt(
     topic_state: TopicState,
     next_topic: Topic | None,
     forced_verdict: AnswerVerdict | None = None,
+    interview_stage: InterviewStage = InterviewStage.EXPERIENCE_TECHNICAL,
 ) -> str:
     """Rebuild instructions from live counters on every answer."""
     callback = next_topic.callback if next_topic else None
@@ -80,6 +80,15 @@ def build_turn_prompt(
         else ""
     )
     prompt = TURN_PROMPT_TEMPLATE.format(
+        interviewer_persona=(
+            "You are a recruiter conducting a realistic phone screen. Be warm, concise, and "
+            "focused on motivation, relevant experience, communication, and logistics. Never "
+            "probe for code, architecture, algorithms, or low-level implementation details."
+            if interview_stage is InterviewStage.PHONE_SCREEN
+            else "You are an engineer conducting a spoken technical experience screen. Probe "
+            "the candidate's personal contribution, engineering decisions, debugging process, "
+            "trade-offs, validation, and results. Do not ask live-coding or LeetCode questions."
+        ),
         topic_title=topic.title,
         good_answer_criteria="\n".join(f"- {criterion}" for criterion in topic.what_good_looks_like),
         followups_remaining=MAX_FOLLOW_UPS_PER_TOPIC - topic_state.followup_count,
@@ -103,10 +112,11 @@ def analyze(
     next_topic: Topic | None,
     client: StructuredClient | None = None,
     forced_verdict: AnswerVerdict | None = None,
+    interview_stage: InterviewStage = InterviewStage.EXPERIENCE_TECHNICAL,
 ) -> tuple[TurnAnalysis, NextMove]:
     """Analyze in one model call, then independently enforce movement quotas in code."""
     llm = client or create_structured_client()
-    prompt = build_turn_prompt(topic, topic_state, next_topic, forced_verdict)
+    prompt = build_turn_prompt(topic, topic_state, next_topic, forced_verdict, interview_stage)
     result = llm.chat.completions.create(
         model=MODEL_NAME,
         response_model=TurnAnalysis,

@@ -24,17 +24,26 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { HelpCircle, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, Timer, ClipboardList, Loader2 } from "lucide-react";
+import { HelpCircle, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, Timer, ClipboardList, Loader2, PhoneCall, MessagesSquare, Code2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CVDraft } from "../drafts-dashboard";
+import { APPLICATION_STORAGE_KEY, CVDraft, TrackedApplication } from "../drafts-dashboard";
+import { JobPosting } from "../jobs-dashboard";
 import { CVData } from "../cv-editor/cv-pdf-preview";
 import {
   answerInterview,
+  abandonInterview,
   createInterview,
+  DeliveryEvidence,
   endInterview,
   FeedbackReport,
   getInterviewReport,
   getInterviewSession,
+  HiringProcessResearch,
+  InterviewStage,
+  listInterviewSessions,
+  recordInterviewEvent,
+  researchHiringProcess,
+  SessionSummary,
   skipInterviewTopic,
   timeoutInterviewTopic,
 } from "@/lib/interview-api";
@@ -71,6 +80,7 @@ function getInterviewUserId(): string {
 interface InterviewWorkspaceProps {
   drafts: CVDraft[];
   cvDatabase: Record<string, CVData>;
+  jobs: JobPosting[];
   initialSessionId?: string;
   onSessionIdChange?: (sessionId: string | null) => void;
   onExamModeChange?: (active: boolean) => void;
@@ -84,6 +94,7 @@ export interface QARecord {
   score: ScoreBreakdown;
   whatWasMissing?: string;
   strongerAnswer?: string;
+  delivery?: DeliveryEvidence;
 }
 
 export interface SessionRecord {
@@ -96,12 +107,64 @@ export interface SessionRecord {
   qa: QARecord[];
 }
 
-export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSessionIdChange, onExamModeChange }: InterviewWorkspaceProps) {
+const reportScore = (value: number) => Math.round(value * 20);
+
+function topicIdToLabel(topicId: string): string {
+  return topicId
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/** Maps a persisted report (from GET /interview/sessions) into the same shape
+ * a freshly-finished session produces, so past and live practice render identically. */
+function summaryToSessionRecord(summary: SessionSummary, drafts: CVDraft[]): SessionRecord {
+  const { report } = summary;
+  const average = Math.round(Object.values(report.scores).reduce((sum, value) => sum + value, 0) * 5);
+  const qa: QARecord[] = report.per_topic.map((feedback) => ({
+    id: `report-${feedback.topic_id}`,
+    topicId: feedback.topic_id,
+    question: topicIdToLabel(feedback.topic_id),
+    answer: feedback.what_they_said,
+    score: {
+      overall: average,
+      situation: reportScore(report.scores.communication),
+      task: reportScore(report.scores.handling_pressure),
+      action: reportScore(report.scores.technical_depth),
+      result: reportScore(report.scores.specificity),
+      relevance: reportScore(report.scores.communication),
+      specificity: reportScore(report.scores.specificity),
+      proseFeedback: feedback.verdict_summary,
+      metricsPresent: /\d/.test(feedback.what_they_said),
+    },
+    whatWasMissing: feedback.what_was_missing,
+    strongerAnswer: feedback.stronger_answer,
+  }));
+
+  return {
+    id: summary.id,
+    role: summary.job_title || "General practice",
+    company: summary.company || "General Prep",
+    date: new Date(summary.created_at).toLocaleDateString(),
+    cvName: drafts.find((draft) => draft.id === summary.cv_draft_id)?.title || "N/A",
+    score: average,
+    qa,
+  };
+}
+
+export function InterviewWorkspace({ drafts, cvDatabase, jobs, initialSessionId, onSessionIdChange, onExamModeChange }: InterviewWorkspaceProps) {
   const [screen, setScreen] = useState<"SETUP" | "INTERVIEW" | "REPORT">("SETUP");
   
   // Choose between General vs. Job & CV Tailored
   const [interviewMode, setInterviewMode] = useState<"tailored" | "general">("tailored");
   const [generalTrack, setGeneralTrack] = useState<"SWE" | "AI">("SWE");
+  const [selectedStage, setSelectedStage] = useState<InterviewStage>("phone_screen");
+  const [appliedJobs, setAppliedJobs] = useState<JobPosting[]>([]);
+  const [applicationsReady, setApplicationsReady] = useState(false);
+  const [hiringProcess, setHiringProcess] = useState<HiringProcessResearch | null>(null);
+  const [isResearchingProcess, setIsResearchingProcess] = useState(false);
+  const [researchError, setResearchError] = useState<string | null>(null);
+  const [researchVersion, setResearchVersion] = useState(0);
 
   // Selected configuration references
   const [selectedDraftId, setSelectedDraftId] = useState("");
@@ -154,58 +217,46 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Dynamic Session History State
-  const [sessionHistory, setSessionHistory] = useState<SessionRecord[]>([
-    {
-      id: "session-1",
-      role: "Senior Frontend Architect",
-      company: "Vercel Partner Studio",
-      date: "2026-07-20",
-      cvName: "Kian Nguyen (v2 - optimized)",
-      score: 88,
-      qa: [
-        {
-          id: "record-topic-1",
-          question: "Can you describe your experience implementing the App Router in client-side applications, and how you design patterns for custom data caching?",
-          answer: "At Macquarie University, I handled 300,000+ requests with Next.js App Router and dynamic client-side pagination, using context boundaries to cache and deduplicate queries.",
-          score: {
-            overall: 90,
-            situation: 95,
-            task: 90,
-            action: 85,
-            result: 90,
-            relevance: 95,
-            specificity: 90,
-            proseFeedback: "Excellent coverage of the React 19 concurrent features. Your explanation of server-side boundaries was clear, and you described the caching challenges using precise state terms.",
-            metricsPresent: true,
-          }
-        },
-        {
-          id: "record-topic-2",
-          question: "How do you organize your styling configuration in Tailwind v4, and what steps do you take to construct reusable custom layouts with shadcn components?",
-          answer: "I structure styles inside globals.css using the new Tailwind v4 theme syntax. I set up custom layouts using shadcn component declarations that consume design tokens, securing a consistent design language.",
-          score: {
-            overall: 85,
-            situation: 80,
-            task: 90,
-            action: 85,
-            result: 85,
-            relevance: 90,
-            specificity: 80,
-            proseFeedback: "Good explanation of utility class organization in Tailwind v4. The structure was coherent, but you could emphasize how theme extension variables are declared inside CSS instead of tailwind.config.",
-            metricsPresent: false,
-          }
-        }
-      ]
-    }
-  ]);
+  // Dynamic Session History State — every completed round already persists in
+  // Supabase (interview_sessions + interview_reports), so this loads the real
+  // history on mount instead of caching it client-side.
+  const [sessionHistory, setSessionHistory] = useState<SessionRecord[]>([]);
 
-  // Target mock jobs catalog
-  const targetJobs = [
-    { id: "job-1", title: "Backend Engineer (Java / Spring Boot)", company: "InnovateTech Solutions", description: "Build high-volume Java and Spring Boot APIs using PostgreSQL, Docker, AWS, CI/CD, and secure service design." },
-    { id: "job-2", title: "Senior Frontend Architect", company: "Vercel Partner Studio", description: "Lead Next.js, React, TypeScript, Tailwind CSS, web performance, caching, accessibility, and frontend architecture." },
-    { id: "job-3", title: "AI Engineer & Full Stack developer", company: "CognitiveAgents Corp", description: "Develop Python and FastAPI AI products with retrieval, vector databases, evaluation, React, Next.js, and Docker." },
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    listInterviewSessions(getInterviewUserId())
+      .then((summaries) => {
+        if (cancelled) return;
+        setSessionHistory(summaries.map((summary) => summaryToSessionRecord(summary, drafts)));
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : "Could not load your practice history");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  // Only needs to run once on mount — later completions are appended locally by saveSessionToHistory.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const load = window.setTimeout(() => {
+      try {
+        const saved = window.localStorage.getItem(APPLICATION_STORAGE_KEY);
+        const applications = saved ? JSON.parse(saved) as Record<string, TrackedApplication> : {};
+        setAppliedJobs(jobs.filter((job) => ["APPLIED", "INTERVIEW"].includes(applications[job.id]?.status ?? "")));
+      } catch {
+        setAppliedJobs([]);
+      } finally {
+        setApplicationsReady(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(load);
+  }, [jobs]);
+
+  const targetJobs = appliedJobs;
 
   const activeJob = targetJobs.find((job) => job.id === selectedJobId);
   const activeCV = cvDatabase[selectedDraftId];
@@ -218,6 +269,25 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     label: `${job.title} @ ${job.company}`,
   }));
 
+  useEffect(() => {
+    if (!activeJob) return;
+    let active = true;
+    const start = window.setTimeout(() => {
+      setIsResearchingProcess(true);
+      setResearchError(null);
+      researchHiringProcess(activeJob.company, activeJob.title, activeJob.url)
+        .then((process) => {
+          if (!active) return;
+          setHiringProcess(process);
+          const firstSupported = process.stages.find((stage) => stage.practice_supported);
+          if (firstSupported?.category === "phone_screen" || firstSupported?.category === "experience_technical") setSelectedStage(firstSupported.category);
+        })
+        .catch((error) => { if (active) setResearchError(error instanceof Error ? error.message : "Could not research this hiring process"); })
+        .finally(() => { if (active) setIsResearchingProcess(false); });
+    }, 0);
+    return () => { active = false; window.clearTimeout(start); };
+  }, [activeJob, researchVersion]);
+
   const handleStartClick = () => {
     if (interviewMode === "tailored" && (!selectedDraftId || !activeCV)) {
       toast.error("Choose a saved CV draft before starting.");
@@ -225,6 +295,10 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     }
     if (interviewMode === "tailored" && !activeJob) {
       toast.error("Choose a target job before starting.");
+      return;
+    }
+    if (interviewMode === "tailored" && !hiringProcess) {
+      toast.error(isResearchingProcess ? "Wait for the hiring-process research to finish." : "Research this job's hiring process before starting.");
       return;
     }
     setShowConfirmStart(true);
@@ -238,7 +312,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     setIsStarting(true);
     try {
       const jobDescription = interviewMode === "tailored"
-        ? `${activeJob!.title} at ${activeJob!.company}. ${activeJob!.description}`
+        ? `${activeJob!.title} at ${activeJob!.company} (${activeJob!.location}). Required skills: ${activeJob!.skillsRequired.join(", ")}.`
         : `General ${generalTrack === "AI" ? "AI engineering" : "software engineering"} interview practice.`;
       const session = await createInterview(
         getInterviewUserId(),
@@ -246,7 +320,14 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
         JSON.stringify(activeCV ?? {}),
         interviewMode === "tailored"
           ? (drafts.find((draft) => draft.id === selectedDraftId)?.level || "Not specified")
-          : "Junior to mid-level practice"
+          : "Junior to mid-level practice",
+        {
+          interviewStage: interviewMode === "tailored" ? selectedStage : "experience_technical",
+          jobTitle: activeJob?.title ?? null,
+          company: activeJob?.company ?? null,
+          cvDraftId: selectedDraftId || null,
+          hiringProcess,
+        }
       );
       setApiSessionId(session.id);
       onSessionIdChange?.(session.id);
@@ -278,8 +359,6 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     }
   };
 
-  const reportScore = (value: number) => Math.round(value * 20);
-
   const finishWithReport = (report: FeedbackReport, evidence: QARecord[]) => {
     const average = Math.round(Object.values(report.scores).reduce((sum, value) => sum + value, 0) * 5);
     const records = report.per_topic.map((feedback, index) => {
@@ -303,6 +382,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
         },
         whatWasMissing: feedback.what_was_missing,
         strongerAnswer: feedback.stronger_answer,
+        delivery: source?.delivery,
       } satisfies QARecord;
     });
     setReportSummary(report);
@@ -322,7 +402,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     throw new Error("The report is taking longer than expected. Please try again shortly.");
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, delivery?: DeliveryEvidence) => {
     if (isPaused || isInterviewerThinking || !apiSessionId) return;
     resetInactivityTimer();
     const activeTopicIdx = topics.findIndex((topic) => topic.status === "active");
@@ -342,13 +422,14 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
       question: questionText,
       answer: text,
       score: emptyScore,
+      delivery,
     };
     const nextEvidence = [...answeredQuestions, evidence];
     setMessages((previous) => [...previous, candidateMsg]);
     setAnsweredQuestions(nextEvidence);
     setIsInterviewerThinking(true);
     try {
-      const result = await answerInterview(apiSessionId, text);
+      const result = await answerInterview(apiSessionId, text, delivery);
       setMessages((previous) => [...previous, {
         id: nextLocalId("msg-int"),
         sender: "interviewer",
@@ -443,6 +524,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
           question: session.config.topics.find((topic) => topic.id === turn.topic_id)?.title || "Interview question",
           answer: turn.answer,
           score: emptyScore,
+          delivery: turn.delivery || undefined,
         }));
         setApiSessionId(session.id);
         setTopics(session.config.topics.map((topic, index) => ({
@@ -519,11 +601,39 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
     }
   };
 
-  const handleQuitLoop = () => {
-    onExamModeChange?.(false); // Exit fullscreen exam mode
-    setApiSessionId(null);
-    setScreen("SETUP");
-    onSessionIdChange?.(null);
+  const handlePauseSession = async () => {
+    if (!apiSessionId) return;
+    try {
+      await recordInterviewEvent(apiSessionId, "paused", { elapsed_seconds: timerSeconds });
+      setIsPaused(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not pause this interview");
+    }
+  };
+
+  const handleResumeSession = async () => {
+    if (!apiSessionId) return;
+    try {
+      await recordInterviewEvent(apiSessionId, "resumed", { elapsed_seconds: timerSeconds });
+      setIsPaused(false);
+      resetInactivityTimer();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not resume this interview");
+    }
+  };
+
+  const handleQuitInterview = async () => {
+    if (!apiSessionId) return;
+    try {
+      await abandonInterview(apiSessionId);
+      onExamModeChange?.(false);
+      setApiSessionId(null);
+      setScreen("SETUP");
+      onSessionIdChange?.(null);
+      toast.info("Interview saved as abandoned. You can start a fresh round when ready.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save and quit this interview");
+    }
   };
 
   const handleViewPastSessionReport = (session: SessionRecord) => {
@@ -739,10 +849,10 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="font-semibold text-zinc-500">Select Target Job Role</label>
-                    <Select items={jobSelectItems} value={selectedJobId} onValueChange={(val) => { if (val) setSelectedJobId(val); }}>
-                      <SelectTrigger className="w-full h-9 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-none">
-                        <SelectValue placeholder="Select target job" />
+                    <label className="font-semibold text-zinc-500">Choose an applied job</label>
+                    <Select items={jobSelectItems} value={selectedJobId} onValueChange={(val) => { if (val) { setSelectedJobId(val); setHiringProcess(null); setResearchError(null); } }}>
+                      <SelectTrigger disabled={!applicationsReady || targetJobs.length === 0} className="w-full h-9 bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-none">
+                        <SelectValue placeholder={applicationsReady && targetJobs.length === 0 ? "No applied jobs yet" : "Select an applied job"} />
                       </SelectTrigger>
                       <SelectContent>
                         {targetJobs.map((j) => (
@@ -752,7 +862,32 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                         ))}
                       </SelectContent>
                     </Select>
+                    {applicationsReady && targetJobs.length === 0 && <p className="text-[11px] text-amber-700">Move a job to Applied or Interview in the Applications board before practising.</p>}
                   </div>
+
+                  {activeJob && (
+                    <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-950/40">
+                      <div className="flex items-start justify-between gap-3">
+                        <div><p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">Researched hiring process</p><p className="mt-1 text-[11px] text-zinc-500">Expected interview stages for {activeJob.company}.</p></div>
+                        {hiringProcess && <Badge variant="secondary" className="text-[9px]">{Math.round(hiringProcess.confidence * 100)}% confidence</Badge>}
+                      </div>
+                      {isResearchingProcess && <div className="mt-4 flex items-center gap-2 rounded-lg bg-white p-4 text-xs text-zinc-500 dark:bg-zinc-900"><Loader2 className="h-4 w-4 animate-spin text-indigo-600" />Tavily is checking company and candidate-reported sources...</div>}
+                      {researchError && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"><p>{researchError}</p><button type="button" onClick={() => setResearchVersion((version) => version + 1)} className="mt-2 font-bold underline">Retry research</button></div>}
+                      {hiringProcess && <>
+                        <p className="mt-3 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">{hiringProcess.summary}</p>
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          {hiringProcess.stages.map((stage, index) => {
+                            const supported = stage.practice_supported && (stage.category === "phone_screen" || stage.category === "experience_technical");
+                            const Icon = stage.category === "phone_screen" ? PhoneCall : stage.category === "experience_technical" ? MessagesSquare : Code2;
+                            return <div key={`${stage.name}-${index}`} className={cn("rounded-lg border p-3 text-left", supported ? selectedStage === stage.category ? "border-indigo-500 bg-white ring-1 ring-indigo-500 dark:bg-zinc-900" : "border-zinc-200 bg-white/60 dark:border-zinc-800 dark:bg-zinc-900/50" : "border-dashed border-zinc-300 opacity-75 dark:border-zinc-700")}>
+                              <button type="button" disabled={!supported} onClick={() => { if (supported) setSelectedStage(stage.category as InterviewStage); }} className="w-full text-left disabled:cursor-default"><Icon className="h-4 w-4 text-indigo-600" /><span className="mt-2 block text-xs font-bold">{index + 1}. {stage.name}</span><span className="mt-1 block text-[10px] leading-relaxed text-zinc-500">{stage.description}</span><span className="mt-2 block text-[9px] font-semibold text-zinc-400">{supported ? "Available to practise" : "Shown for context, outside Athena"} · {Math.round(stage.confidence * 100)}%</span></button>
+                              {stage.evidence.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{stage.evidence.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer" className="text-[9px] font-semibold text-indigo-600 hover:underline">Source</a>)}</div>}
+                            </div>;
+                          })}
+                        </div>
+                      </>}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -832,8 +967,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
               </div>
               <Button
                 onClick={() => {
-                  setIsPaused(false);
-                  resetInactivityTimer();
+                  void handleResumeSession();
                 }}
                 className="h-10 px-6 bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs font-semibold rounded-xl flex items-center gap-1.5 shadow-none border-none"
               >
@@ -866,7 +1000,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                 {interviewMode === "general" ? (
                   <span>General Practice Track: <strong className="text-zinc-700 dark:text-zinc-300">{generalTrack === "AI" ? "AI Engineer" : "Software Engineer (SWE)"}</strong></span>
                 ) : (
-                  <span>Evaluating: <strong className="text-zinc-700 dark:text-zinc-300">{activeCV?.fullName || "Selected CV"}</strong> for <strong className="text-zinc-700 dark:text-zinc-300">{activeJob?.title || "Selected job"}</strong></span>
+                  <span><strong className="text-zinc-700 dark:text-zinc-300">{selectedStage === "phone_screen" ? "Phone screen" : "Technical conversation"}</strong> · {activeCV?.fullName || "Selected CV"} for {activeJob?.title || "Selected job"}</span>
                 )}
               </p>
             </div>
@@ -894,7 +1028,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setIsPaused(true)}
+                onClick={() => void handlePauseSession()}
                 className="h-9 text-[11px] border-zinc-250 hover:bg-zinc-100 flex items-center gap-1 px-3 font-semibold text-zinc-750 shadow-none"
               >
                 <Pause className="h-3.5 w-3.5" />
@@ -911,7 +1045,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
               <Button
                 variant="outline"
                 size="sm"
-                onClick={handleQuitLoop}
+                onClick={() => void handleQuitInterview()}
                 className="h-9 text-[11px] border-zinc-250 text-rose-700 hover:bg-rose-50 flex items-center gap-1 px-3 font-semibold shadow-none"
               >
                 Quit Loop
@@ -920,7 +1054,7 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
           </div>
 
           {/* Chat Feed */}
-          <div className="max-w-5xl mx-auto w-full h-[600px] flex-1 min-h-0">
+          <div className="mx-auto w-full max-w-7xl flex-1 min-h-0">
             <InterviewChat
               messages={messages}
               onSendMessage={handleSendMessage}
@@ -1020,6 +1154,13 @@ export function InterviewWorkspace({ drafts, cvDatabase, initialSessionId, onSes
                     <div className="shrink-0 rounded-lg bg-emerald-50 px-3 py-2 text-center text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400"><span className="block text-xl font-black">{activeScore.overall}</span><span className="text-[9px] font-bold uppercase">Overall</span></div>
                   </div>
                   <div className="mt-4 rounded-lg bg-zinc-50 p-4 dark:bg-zinc-950"><p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Your answer</p><p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{activeQA?.answer}</p></div>
+                  {activeQA?.delivery && (
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                      <div className="rounded-lg border border-zinc-200 p-2 dark:border-zinc-800"><span className="block text-sm font-bold">{Math.round(activeQA.delivery.duration_seconds)}s</span><span className="text-[9px] uppercase text-zinc-500">Duration</span></div>
+                      <div className="rounded-lg border border-zinc-200 p-2 dark:border-zinc-800"><span className="block text-sm font-bold">{Math.round(activeQA.delivery.words_per_minute)}</span><span className="text-[9px] uppercase text-zinc-500">Words/min</span></div>
+                      <div className="rounded-lg border border-zinc-200 p-2 dark:border-zinc-800"><span className="block text-sm font-bold">{activeQA.delivery.filler_words}</span><span className="text-[9px] uppercase text-zinc-500">Fillers</span></div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

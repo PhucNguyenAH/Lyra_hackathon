@@ -16,6 +16,7 @@ export interface JobPosting {
   matchScore: number;
   skillsRequired: string[];
   skillsMatched: string[];
+  url?: string;
 }
 
 interface JobsDashboardProps {

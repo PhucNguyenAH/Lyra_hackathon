@@ -7,7 +7,9 @@ from interview.question_gen import build_question_prompt, generate_topics
 from interview.schemas import (
     AnswerVerdict,
     ChatMessage,
+    DeliveryEvidence,
     FeedbackReport,
+    InterviewStage,
     InterviewState,
     NextMove,
     QuestionType,
@@ -139,6 +141,46 @@ def test_question_prompt_prioritizes_previous_weakness_and_cv() -> None:
     assert "Do not challenge" in prompt
 
 
+def test_question_prompt_keeps_platform_rounds_conversational() -> None:
+    phone_prompt = build_question_prompt(
+        "Built a banking API at CloudCorp.",
+        "Backend Engineer at Example Co",
+        [],
+        "Junior",
+        InterviewStage.PHONE_SCREEN,
+    )
+    technical_prompt = build_question_prompt(
+        "Built a banking API at CloudCorp.",
+        "Backend Engineer at Example Co",
+        [],
+        "Junior",
+        InterviewStage.EXPERIENCE_TECHNICAL,
+    )
+
+    assert "INTERVIEW ROUND: phone_screen" in phone_prompt
+    assert "Do not ask coding" in phone_prompt
+    assert "INTERVIEW ROUND: experience_technical" in technical_prompt
+    assert "Do not ask LeetCode" in technical_prompt
+    assert "recruiter conducting a realistic 25-30 minute phone screen" in phone_prompt
+    assert "engineer conducting a 45-60 minute technical experience phone screen" in technical_prompt
+
+
+def test_live_followups_match_the_selected_round() -> None:
+    recruiter_prompt = build_turn_prompt(
+        topic(), TopicState(topic_id="api-caching"), topic("next"),
+        interview_stage=InterviewStage.PHONE_SCREEN,
+    )
+    technical_prompt = build_turn_prompt(
+        topic(), TopicState(topic_id="api-caching"), topic("next"),
+        interview_stage=InterviewStage.EXPERIENCE_TECHNICAL,
+    )
+
+    assert "You are a recruiter" in recruiter_prompt
+    assert "Never probe for code" in recruiter_prompt
+    assert "You are an engineer" in technical_prompt
+    assert "debugging process" in technical_prompt
+
+
 def test_generate_topics_requests_structured_topic_list() -> None:
     topics = [topic(f"topic-{index}") for index in range(6)]
     client = FakeClient(lambda _: topics)
@@ -182,3 +224,57 @@ def test_evaluator_receives_transcript_and_returns_typed_report() -> None:
     user_message = client.completions.calls[0]["messages"]
     assert result == report
     assert "I used Redis" in str(user_message)
+
+
+def test_evaluator_uses_round_specific_score_expectations() -> None:
+    report = FeedbackReport.model_validate({
+        "overall": "Clear motivation.",
+        "scores": {"specificity": 3, "technical_depth": 3, "communication": 4, "handling_pressure": 3},
+        "per_topic": [{"topic_id": "api-caching", "verdict_summary": "Clear", "what_they_said": "Redis", "what_was_missing": "Impact", "stronger_answer": "I used Redis to improve response time."}],
+        "weak_topics": [
+            {"topic": "Impact", "why_weak": "No result", "drill_suggestion": "Add one metric"},
+            {"topic": "Motivation", "why_weak": "Generic", "drill_suggestion": "Name one company reason"},
+        ],
+        "one_thing": "Be specific.",
+    })
+    client = FakeClient(lambda _: report)
+    state = InterviewState(topic_states=[TopicState(topic_id="api-caching")])
+
+    evaluate_session([topic()], state, client, interview_stage=InterviewStage.PHONE_SCREEN)
+
+    assert "recruiter phone screen" in str(client.completions.calls[0]["messages"])
+    assert "Do not penalize missing low-level technical depth" in str(client.completions.calls[0]["messages"])
+
+
+def test_evaluator_receives_observable_delivery_evidence() -> None:
+    report = FeedbackReport.model_validate(
+        {
+            "overall": "The answer had useful detail but ran long.",
+            "scores": {"specificity": 3, "technical_depth": 3, "communication": 2, "handling_pressure": 3},
+            "per_topic": [{"topic_id": "api-caching", "verdict_summary": "Long answer", "what_they_said": "I used Redis", "what_was_missing": "A concise result", "stronger_answer": "I used Redis and measured the result."}],
+            "weak_topics": [
+                {"topic": "Pace", "why_weak": "The answer was rushed", "drill_suggestion": "Pause after each STAR section"},
+                {"topic": "Impact", "why_weak": "No result", "drill_suggestion": "End with one metric"},
+            ],
+            "one_thing": "Slow down and close with impact.",
+        }
+    )
+    client = FakeClient(lambda _: report)
+    state = InterviewState(
+        topic_states=[TopicState(topic_id="api-caching")],
+        messages=[ChatMessage(role="candidate", content="I used Redis")],
+        turns=[
+            {
+                "topic_id": "api-caching",
+                "answer": "I used Redis",
+                "delivery": DeliveryEvidence(duration_seconds=12, word_count=3, words_per_minute=15, filler_words=1),
+                "analysis": {"verdict": "solid", "reasoning": "Specific", "interviewer_message": "Thanks."},
+                "move": "complete",
+            }
+        ],
+    )
+
+    evaluate_session([topic()], state, client)
+
+    assert "words_per_minute" in str(client.completions.calls[0]["messages"])
+    assert "filler_words" in str(client.completions.calls[0]["messages"])

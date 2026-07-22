@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { Card, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AudioLines, Check, Loader2, Mic, MicOff, Pause, RotateCcw, Send, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, MicOff, Send, HelpCircle, User, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { DeliveryEvidence, transcribeInterviewAudio } from "@/lib/interview-api";
 
 export interface Message {
   id: string;
@@ -17,396 +17,307 @@ export interface Message {
 
 interface InterviewChatProps {
   messages: Message[];
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, delivery?: DeliveryEvidence) => void;
   isInterviewerThinking: boolean;
   interviewerName?: string;
   inactivityNotice?: string | null;
   onInputActivity?: () => void;
 }
 
-interface SpeechRecognitionResultEventLike extends Event {
-  resultIndex: number;
-  results: SpeechRecognitionResultList;
+const FILLER_PATTERN = /\b(um+|uh+|erm+|hmm+|like|basically|actually|literally|you know|sort of|kind of)\b/gi;
+const AUTO_SUBMIT_SECONDS = 3;
+const SILENCE_STOP_MS = 4_000;
+const SPEECH_LEVEL = 0.025;
+
+function formatTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${(seconds % 60).toString().padStart(2, "0")}`;
 }
 
-interface SpeechRecognitionErrorEventLike extends Event {
-  error: string;
-}
-
-interface SpeechRecognitionLike {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
-  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-}
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
-
-declare global {
-  interface Window {
-    SpeechRecognition?: SpeechRecognitionConstructor;
-    webkitSpeechRecognition?: SpeechRecognitionConstructor;
-  }
+function deliveryFor(text: string, durationSeconds: number): DeliveryEvidence {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  return {
+    duration_seconds: Math.max(durationSeconds, 1),
+    word_count: wordCount,
+    words_per_minute: Math.min(400, Math.round((wordCount / Math.max(durationSeconds, 1)) * 60)),
+    filler_words: (text.match(FILLER_PATTERN) || []).length,
+    transcript_source: "groq_whisper",
+  };
 }
 
 export function InterviewChat({
   messages,
   onSendMessage,
   isInterviewerThinking,
-  interviewerName = "Alex — Technical Interviewer",
+  interviewerName = "Alex Morgan",
   inactivityNotice,
   onInputActivity,
 }: InterviewChatProps) {
-  const [inputText, setInputText] = useState("");
+  const [transcript, setTranscript] = useState("");
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [speechError, setSpeechError] = useState<string | null>(null);
-  const [speechNotice, setSpeechNotice] = useState<string | null>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-  const transcriptBeforeRecordingRef = useRef("");
-  const currentRecognitionTranscriptRef = useRef("");
-  const manualStopRef = useRef(false);
-  const isRecordingRef = useRef(false);
+  const [recordedDuration, setRecordedDuration] = useState<number | null>(null);
+  const [autoSubmitSeconds, setAutoSubmitSeconds] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startedAtRef = useRef(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analysisFrameRef = useRef<number | null>(null);
+  const speechDetectedRef = useRef(false);
+  const silenceStartedAtRef = useRef<number | null>(null);
+  const submittedRef = useRef(false);
 
-  // Auto-scroll to bottom of chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isInterviewerThinking]);
+  const currentQuestion = useMemo(
+    () => [...messages].reverse().find((message) => message.sender === "interviewer")?.text || "Preparing your next question...",
+    [messages]
+  );
+  const answerNumber = messages.filter((message) => message.sender === "candidate").length + 1;
+  const liveDelivery = transcript && recordedDuration ? deliveryFor(transcript, recordedDuration) : null;
 
-  // Recording Timer Effect
-  useEffect(() => {
-    if (isRecording) {
-      let elapsedSeconds = 0;
-      recordingTimer.current = setInterval(() => {
-        elapsedSeconds += 1;
-        setRecordingSeconds(elapsedSeconds);
+  const releaseMicrophone = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = null;
+    if (analysisFrameRef.current) cancelAnimationFrame(analysisFrameRef.current);
+    analysisFrameRef.current = null;
+    void audioContextRef.current?.close();
+    audioContextRef.current = null;
+  };
 
-        if (elapsedSeconds >= 300) {
-          // Set these before stop() so onend knows this was intentional and does not restart.
-          manualStopRef.current = true;
-          isRecordingRef.current = false;
-          recognitionRef.current?.stop();
-          setIsRecording(false);
-          setSpeechNotice("Voice recording reached the 5-minute limit. Your transcript has been saved.");
-        }
-      }, 1000);
-    } else {
-      if (recordingTimer.current) clearInterval(recordingTimer.current);
-    }
-
-    return () => {
-      if (recordingTimer.current) clearInterval(recordingTimer.current);
-    };
-  }, [isRecording]);
-
-  useEffect(() => {
-    return () => {
-      manualStopRef.current = true;
-      isRecordingRef.current = false;
-      recognitionRef.current?.abort();
-    };
+  useEffect(() => () => {
+    recorderRef.current?.stop();
+    releaseMicrophone();
   }, []);
 
-  const handleSend = () => {
-    if (inputText.trim()) {
-      onSendMessage(inputText);
-      setInputText("");
-    }
+  const resetAnswer = () => {
+    setTranscript("");
+    setRecordedDuration(null);
+    setRecordingSeconds(0);
+    setError(null);
+    setAutoSubmitSeconds(null);
+    submittedRef.current = false;
   };
 
-  const startVoiceRecognition = () => {
-    const SpeechRecognition =
-      window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setSpeechError(
-        "Voice typing is not supported in this browser. Try Chrome or Edge, or type your answer."
-      );
-      return;
-    }
-
-    setSpeechError(null);
-    setSpeechNotice(null);
-    transcriptBeforeRecordingRef.current = inputText.trim();
-    currentRecognitionTranscriptRef.current = "";
-    manualStopRef.current = false;
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-AU";
-
-    recognition.onresult = (event) => {
-      let finalTranscript = "";
-      let interimTranscript = "";
-
-      for (let index = 0; index < event.results.length; index += 1) {
-        const transcript = event.results[index][0]?.transcript ?? "";
-        if (event.results[index].isFinal) finalTranscript += transcript;
-        else interimTranscript += transcript;
+  const monitorSilence = (stream: MediaStream, recorder: MediaRecorder) => {
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    context.createMediaStreamSource(stream).connect(analyser);
+    audioContextRef.current = context;
+    speechDetectedRef.current = false;
+    silenceStartedAtRef.current = null;
+    const samples = new Uint8Array(analyser.fftSize);
+    const sample = () => {
+      if (recorder.state !== "recording") return;
+      analyser.getByteTimeDomainData(samples);
+      let energy = 0;
+      for (const value of samples) {
+        const normalized = (value - 128) / 128;
+        energy += normalized * normalized;
       }
-
-      const combinedTranscript = [
-        transcriptBeforeRecordingRef.current,
-        finalTranscript.trim(),
-        interimTranscript.trim(),
-      ]
-        .filter(Boolean)
-        .join(" ");
-
-      currentRecognitionTranscriptRef.current = [
-        finalTranscript.trim(),
-        interimTranscript.trim(),
-      ]
-        .filter(Boolean)
-        .join(" ");
-      onInputActivity?.();
-      setInputText(combinedTranscript);
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error === "no-speech") return;
-
-      const message =
-        event.error === "not-allowed" || event.error === "service-not-allowed"
-          ? "Microphone access was denied. Allow microphone access in your browser settings and try again."
-          : `Voice typing stopped (${event.error}). Please try again.`;
-      manualStopRef.current = true;
-      isRecordingRef.current = false;
-      setSpeechError(message);
-      setIsRecording(false);
-    };
-
-    recognition.onend = () => {
-      if (currentRecognitionTranscriptRef.current) {
-        transcriptBeforeRecordingRef.current = [
-          transcriptBeforeRecordingRef.current,
-          currentRecognitionTranscriptRef.current,
-        ]
-          .filter(Boolean)
-          .join(" ");
-        currentRecognitionTranscriptRef.current = "";
-        setInputText(transcriptBeforeRecordingRef.current);
-      }
-
-      if (!manualStopRef.current && isRecordingRef.current) {
-        try {
-          recognition.start();
+      const level = Math.sqrt(energy / samples.length);
+      if (level >= SPEECH_LEVEL) {
+        speechDetectedRef.current = true;
+        silenceStartedAtRef.current = null;
+      } else if (speechDetectedRef.current) {
+        silenceStartedAtRef.current ??= Date.now();
+        if (Date.now() - silenceStartedAtRef.current >= SILENCE_STOP_MS) {
+          recorder.stop();
           return;
-        } catch {
-          setSpeechError("Voice typing could not restart. Please click the microphone to continue.");
         }
       }
-
-      isRecordingRef.current = false;
-      setIsRecording(false);
-      recognitionRef.current = null;
+      analysisFrameRef.current = requestAnimationFrame(sample);
     };
+    analysisFrameRef.current = requestAnimationFrame(sample);
+  };
 
-    recognitionRef.current = recognition;
-
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setError("This browser cannot record audio. Use current Chrome, Edge, or Safari, or type your answer below.");
+      return;
+    }
     try {
-      recognition.start();
-      setRecordingSeconds(0);
-      isRecordingRef.current = true;
+      setError(null);
+      resetAnswer();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      streamRef.current = stream;
+      const preferredType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType: preferredType });
+      recorderRef.current = recorder;
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunksRef.current.push(event.data); };
+      recorder.onstop = async () => {
+        const elapsed = Math.max(1, Math.round((Date.now() - startedAtRef.current) / 1000));
+        const audio = new Blob(chunksRef.current, { type: recorder.mimeType });
+        releaseMicrophone();
+        setIsRecording(false);
+        setRecordedDuration(elapsed);
+        setIsTranscribing(true);
+        try {
+          const result = await transcribeInterviewAudio(audio);
+          setTranscript(result.text);
+          if (result.duration_seconds) setRecordedDuration(Math.max(1, result.duration_seconds));
+          setAutoSubmitSeconds(AUTO_SUBMIT_SECONDS);
+          onInputActivity?.();
+        } catch (transcriptionError) {
+          setError(transcriptionError instanceof Error ? transcriptionError.message : "Groq Whisper could not transcribe this answer.");
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+      startedAtRef.current = Date.now();
+      recorder.start(1000);
+      monitorSilence(stream, recorder);
       setIsRecording(true);
-    } catch {
-      recognitionRef.current = null;
-      setSpeechError("Voice typing could not start. Please try again.");
-    }
-  };
-
-  const handleVoiceRecordToggle = () => {
-    if (isRecording) {
-      manualStopRef.current = true;
-      isRecordingRef.current = false;
-      recognitionRef.current?.stop();
       setRecordingSeconds(0);
-      setIsRecording(false);
-    } else {
-      startVoiceRecognition();
+      timerRef.current = setInterval(() => {
+        const seconds = Math.round((Date.now() - startedAtRef.current) / 1000);
+        setRecordingSeconds(seconds);
+        if (seconds >= 300 && recorder.state === "recording") recorder.stop();
+      }, 250);
+    } catch {
+      releaseMicrophone();
+      setError("Microphone access was denied. Allow access in the browser address bar and try again.");
     }
   };
 
-  const formatTime = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const remainingSecs = secs % 60;
-    return `${mins}:${remainingSecs.toString().padStart(2, "0")}`;
+  const stopRecording = () => {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  };
+
+  const submitAnswer = () => {
+    if (!transcript.trim() || submittedRef.current) return;
+    submittedRef.current = true;
+    setAutoSubmitSeconds(null);
+    onSendMessage(transcript.trim(), liveDelivery || undefined);
+    resetAnswer();
+  };
+
+  useEffect(() => {
+    if (autoSubmitSeconds === null) return;
+    const timeout = window.setTimeout(() => {
+      if (autoSubmitSeconds <= 1) submitAnswer();
+      else setAutoSubmitSeconds(autoSubmitSeconds - 1);
+    }, 1_000);
+    return () => window.clearTimeout(timeout);
+  // The countdown deliberately submits the current transcript snapshot.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSubmitSeconds]);
+
+  const submitStuckAnswer = () => {
+    setAutoSubmitSeconds(null);
+    onSendMessage("I’m not sure how to answer this question.");
+    resetAnswer();
   };
 
   return (
-    <Card className="border-zinc-200 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-md shadow-sm h-full flex flex-col">
-      <CardHeader className="pb-3 border-b border-zinc-200/50 dark:border-zinc-800/50 flex-shrink-0">
-        <CardTitle className="text-base font-semibold flex items-center gap-2">
-          <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-          </span>
-          {interviewerName}
-        </CardTitle>
-      </CardHeader>
-
-      {/* Messages timeline viewport using ScrollArea */}
-      <ScrollArea className="flex-1 p-6 pr-4 min-h-0">
-        <div className="space-y-4 pr-3 pb-4">
-          {messages.map((msg) => {
-            const isInterviewer = msg.sender === "interviewer";
-            return (
-              <div
-                key={msg.id}
-                className={cn(
-                  "flex gap-3 max-w-[85%] text-xs leading-relaxed animate-in fade-in-50 duration-200",
-                  isInterviewer ? "mr-auto text-left" : "ml-auto flex-row-reverse text-left"
-                )}
-              >
-                {/* Avatar Icon */}
-                <div className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-lg flex-shrink-0 border",
-                  isInterviewer
-                    ? "bg-indigo-50 border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400"
-                    : "bg-zinc-100 border-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:border-zinc-800 dark:text-zinc-400"
-                )}>
-                  {isInterviewer ? <HelpCircle className="h-4 w-4" /> : <User className="h-4 w-4" />}
-                </div>
-
-                {/* Message Bubble Container */}
-                <div className="space-y-1">
-                  <div className={cn(
-                    "p-3 rounded-2xl border",
-                    isInterviewer
-                      ? "bg-white dark:bg-zinc-950/40 border-zinc-100 dark:border-zinc-800 rounded-tl-sm text-zinc-800 dark:text-zinc-200 shadow-sm"
-                      : "bg-indigo-600 dark:bg-indigo-500 border-none rounded-tr-sm text-white shadow-sm font-medium"
-                  )}>
-                    {msg.text}
-                  </div>
-                  <span className="text-[11px] text-zinc-400 dark:text-zinc-500 px-1 block">
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Interviewer Thinking State */}
-          {isInterviewerThinking && (
-            <div className="flex gap-3 max-w-[85%] text-xs mr-auto items-center">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:border-indigo-900/50 dark:text-indigo-400 flex-shrink-0">
-                <Loader2 className="h-4 w-4 animate-spin" />
-              </div>
-              <div className="p-3 bg-white dark:bg-zinc-950/40 border border-zinc-100 dark:border-zinc-800 rounded-2xl rounded-tl-sm text-zinc-400 dark:text-zinc-500 shadow-sm flex items-center gap-1.5 font-medium italic">
-                Interviewer is thinking...
-              </div>
-            </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-      </ScrollArea>
-
-      {/* Input controls footer */}
-      <CardFooter className="p-4 border-t border-zinc-200/50 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/30 flex flex-col gap-3 flex-shrink-0">
-        {/* Voice recording overlay */}
-        {isRecording && (
-          <div className="w-full flex items-center justify-between p-3 rounded-lg border border-red-500/10 bg-red-500/5 text-xs text-red-600 dark:text-red-400 animate-pulse">
+    <div className="grid h-full min-h-0 gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <Card className="min-h-0 overflow-hidden border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <CardContent className="flex h-full min-h-[560px] flex-col p-0">
+          <div className="flex items-center justify-between border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
             <div className="flex items-center gap-3">
-              <span className="flex h-2 w-2 rounded-full bg-red-500"></span>
-              <span className="font-semibold">Recording Mic Input... {formatTime(recordingSeconds)}</span>
+              <div className="relative flex h-11 w-11 items-center justify-center rounded-full bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900">
+                <UserRound className="h-5 w-5" />
+                <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500 dark:border-zinc-900" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">{interviewerName}</p>
+                <p className="text-[11px] text-zinc-500">Technical interviewer · Live session</p>
+              </div>
             </div>
-
-            {/* Bouncing audio wave simulation */}
-            <div className="flex items-center gap-0.5 h-6">
-              {[10, 17, 13, 21, 15, 19, 11, 16].map((height, index) => (
-                <span
-                  key={index}
-                  className="w-[3px] bg-red-500 dark:bg-red-400 rounded-full animate-bounce"
-                  style={{
-                    height: `${height}px`,
-                    animationDelay: `${index * 0.1}s`,
-                    animationDuration: `${0.45 + (index % 4) * 0.1}s`,
-                  }}
-                />
-              ))}
+            <div className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.15em] text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+              Recording enabled
             </div>
           </div>
-        )}
 
-        {speechError && (
-          <p role="alert" className="w-full text-xs text-red-600 dark:text-red-400">
-            {speechError}
-          </p>
-        )}
-
-        {speechNotice && (
-          <p role="status" className="w-full text-xs text-indigo-600 dark:text-indigo-400">
-            {speechNotice}
-          </p>
-        )}
-
-        {inactivityNotice && (
-          <p role="status" className="w-full text-xs text-amber-700 dark:text-amber-300">
-            {inactivityNotice}
-          </p>
-        )}
-
-        <div className="flex w-full gap-2 items-end">
-          {/* Micro Recording Button */}
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={handleVoiceRecordToggle}
-            disabled={isInterviewerThinking}
-            className={cn(
-              "w-11 h-11 rounded-xl flex-shrink-0 transition-colors border",
-              isRecording
-                ? "bg-red-500 border-red-500 text-white hover:bg-red-600"
-                : "border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center md:px-14">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-600">Question {answerNumber}</p>
+            <h2 className="mt-4 max-w-3xl text-xl font-semibold leading-relaxed text-zinc-950 md:text-2xl dark:text-zinc-50">
+              {currentQuestion}
+            </h2>
+            {isInterviewerThinking && (
+              <div className="mt-6 flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />Preparing the next question...</div>
             )}
-            title={isRecording ? "Stop Recording" : "Record with Voice"}
-            aria-label={isRecording ? "Stop voice recording" : "Record answer with voice"}
-          >
-            {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-          </Button>
 
-          {/* Text input area */}
-          <div className="flex-1 relative">
-            <Textarea
-              placeholder={isRecording ? "Speak now..." : "Type your answer here..."}
-              value={inputText}
-              onChange={(e) => {
-                setInputText(e.target.value);
-                onInputActivity?.();
-              }}
-              disabled={isRecording}
-              aria-label="Your answer"
-              className="min-h-[44px] max-h-[120px] py-2.5 px-3 pr-10 text-xs resize-none rounded-xl bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus-visible:ring-indigo-500"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-            />
+            <div className="mt-10 flex min-h-28 flex-col items-center justify-center">
+              {isRecording ? (
+                <>
+                  <button onClick={stopRecording} className="flex h-20 w-20 items-center justify-center rounded-full bg-red-600 text-white shadow-lg shadow-red-600/25 transition hover:scale-105" aria-label="Stop recording">
+                    <MicOff className="h-8 w-8" />
+                  </button>
+                  <p className="mt-4 font-mono text-xl font-bold text-zinc-900 dark:text-zinc-100">{formatTime(recordingSeconds)}</p>
+                  <div className="mt-3 flex h-6 items-center gap-1" aria-hidden="true">
+                    {[12, 22, 16, 28, 18, 25, 14, 21, 11].map((height, index) => <span key={index} className="w-1 animate-pulse rounded-full bg-red-500" style={{ height, animationDelay: `${index * 80}ms` }} />)}
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-500">Answer naturally. Recording stops after four seconds of silence.</p>
+                </>
+              ) : isTranscribing ? (
+                <div className="flex flex-col items-center text-zinc-600"><Loader2 className="h-10 w-10 animate-spin text-indigo-600" /><p className="mt-4 text-sm font-semibold">Groq Whisper is preparing your transcript...</p></div>
+              ) : (
+                <>
+                  <button onClick={startRecording} disabled={isInterviewerThinking} className="flex h-20 w-20 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg shadow-indigo-600/25 transition hover:scale-105 hover:bg-indigo-700 disabled:opacity-40" aria-label="Start recording answer">
+                    <Mic className="h-8 w-8" />
+                  </button>
+                  <p className="mt-4 text-sm font-semibold text-zinc-800 dark:text-zinc-200">Press to answer</p>
+                  <p className="mt-1 text-xs text-zinc-500">Your audio is transcribed, evaluated, then discarded.</p>
+                </>
+              )}
+            </div>
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Submit Send Button */}
-          <Button
-            type="button"
-            onClick={handleSend}
-            disabled={!inputText.trim() || isRecording || isInterviewerThinking}
-            aria-label="Send answer"
-            className="w-11 h-11 rounded-xl bg-indigo-600 dark:bg-indigo-500 text-white hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-500/20 active:scale-95 transition-all flex-shrink-0"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-      </CardFooter>
-    </Card>
+      <div className="flex min-h-0 flex-col gap-4">
+        <Card className="border-zinc-200 shadow-none dark:border-zinc-800">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2"><AudioLines className="h-4 w-4 text-indigo-600" /><h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">Answer transcript</h3></div>
+            <Textarea
+              value={transcript}
+              onChange={(event) => { setTranscript(event.target.value); setRecordedDuration(null); setAutoSubmitSeconds(null); onInputActivity?.(); }}
+              placeholder="Record your answer, or type here if you cannot use a microphone."
+              disabled={isRecording || isTranscribing || isInterviewerThinking}
+              className="mt-3 min-h-48 resize-none text-sm leading-relaxed"
+            />
+            {error && <p role="alert" className="mt-3 text-xs leading-relaxed text-red-600">{error}</p>}
+            {inactivityNotice && <p className="mt-3 text-xs leading-relaxed text-amber-700">{inactivityNotice}</p>}
+            {autoSubmitSeconds !== null && (
+              <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-200">
+                <div className="flex items-center justify-between gap-3"><span>Submitting in <strong>{autoSubmitSeconds}s</strong>...</span><button type="button" onClick={() => setAutoSubmitSeconds(null)} className="flex items-center gap-1 font-bold hover:underline"><Pause className="h-3.5 w-3.5" />Review first</button></div>
+              </div>
+            )}
+            <div className="mt-3 flex gap-2">
+              <Button variant="outline" size="sm" onClick={resetAnswer} disabled={!transcript && !error}><RotateCcw className="mr-1.5 h-3.5 w-3.5" />Retake</Button>
+              <Button size="sm" onClick={submitAnswer} disabled={!transcript.trim() || isRecording || isTranscribing || isInterviewerThinking} className="flex-1 bg-zinc-900 text-white hover:bg-zinc-800"><Send className="mr-1.5 h-3.5 w-3.5" />Submit answer</Button>
+            </div>
+            <button type="button" onClick={submitStuckAnswer} disabled={isRecording || isTranscribing || isInterviewerThinking} className="mt-3 w-full text-center text-xs font-semibold text-zinc-500 hover:text-zinc-900 hover:underline dark:hover:text-zinc-100">I’m not sure, help me</button>
+          </CardContent>
+        </Card>
+
+        <Card className="flex-1 border-zinc-200 bg-zinc-50 shadow-none dark:border-zinc-800 dark:bg-zinc-900/50">
+          <CardContent className="p-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">Live delivery check</h3>
+            {liveDelivery ? (
+              <div className="mt-4 space-y-3 text-xs">
+                <Metric label="Answer length" value={`${Math.round(liveDelivery.duration_seconds)} sec`} good={liveDelivery.duration_seconds >= 30 && liveDelivery.duration_seconds <= 180} />
+                <Metric label="Speaking pace" value={`${liveDelivery.words_per_minute} wpm`} good={liveDelivery.words_per_minute >= 110 && liveDelivery.words_per_minute <= 170} />
+                <Metric label="Filler words" value={`${liveDelivery.filler_words}`} good={liveDelivery.filler_words <= 3} />
+                <p className="border-t border-zinc-200 pt-3 leading-relaxed text-zinc-500 dark:border-zinc-800">These are observable coaching signals, not emotion or personality judgments.</p>
+              </div>
+            ) : (
+              <p className="mt-3 text-xs leading-relaxed text-zinc-500">Record an answer to measure duration, pace, and filler-word frequency.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   );
+}
+
+function Metric({ label, value, good }: { label: string; value: string; good: boolean }) {
+  return <div className="flex items-center justify-between"><span className="text-zinc-500">{label}</span><span className={cn("flex items-center gap-1 font-bold", good ? "text-emerald-700" : "text-amber-700")}><Check className="h-3.5 w-3.5" />{value}</span></div>;
 }

@@ -5,13 +5,29 @@ import { usePathname, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
 import { type JobPosting } from "@/components/jobs-dashboard";
+import { JOB_POSTINGS_SEED, sortAustraliaFirst, DEMO_SEEDED_APPLICATION_ID } from "@/lib/job-postings-seed";
 import { CVEditorWorkspace } from "@/components/cv-editor/cv-editor-workspace";
 import { InterviewWorkspace } from "@/components/interview-practice/interview-workspace";
 import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { tailorApplication } from "@/lib/profile-api";
 
 type TabId = "drafts" | "applications" | "cv-editor" | "interview";
+
+const CONFIGURED_USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
+const BROWSER_USER_ID_KEY = "lyra-interview-user-id";
+
+function getBuilderUserId(): string {
+  if (CONFIGURED_USER_ID) return CONFIGURED_USER_ID;
+  const existing = window.localStorage.getItem(BROWSER_USER_ID_KEY);
+  if (existing) return existing;
+  const generated = window.crypto.randomUUID();
+  window.localStorage.setItem(BROWSER_USER_ID_KEY, generated);
+  return generated;
+}
+
 
 export default function Home({ interviewSessionId }: { interviewSessionId?: string } = {}) {
   const pathname = usePathname();
@@ -49,43 +65,22 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
     "draft-1": initialKianCVData,
   });
 
-  // Hoisted Jobs State
-  const [jobs] = useState<JobPosting[]>([
-    {
-      id: "job-1",
-      title: "Backend Engineer (Java / Spring Boot)",
-      company: "InnovateTech Solutions",
-      location: "Sydney, NSW (Hybrid)",
-      matchScore: 92,
-      skillsRequired: ["Java", "Spring Boot", "Spring Security", "PostgreSQL", "Docker", "AWS", "CI/CD"],
-      skillsMatched: ["Java", "Spring Boot", "Spring Security", "PostgreSQL", "Docker", "AWS", "CI/CD"],
-    },
-    {
-      id: "job-2",
-      title: "Senior Frontend Architect",
-      company: "Vercel Partner Studio",
-      location: "Sydney, NSW (Remote)",
-      matchScore: 62,
-      skillsRequired: ["Next.js", "React.js", "TypeScript", "TailwindCSS", "Prisma", "AWS", "Performance Optimization"],
-      skillsMatched: ["React.js", "TypeScript", "TailwindCSS", "Prisma", "AWS"],
-    },
-    {
-      id: "job-3",
-      title: "AI Engineer & Full Stack developer",
-      company: "CognitiveAgents Corp",
-      location: "Sydney, NSW (On-site)",
-      matchScore: 84,
-      skillsRequired: ["Python", "FastAPI", "LangChain", "ChromaDB", "React.js", "Next.js", "Docker"],
-      skillsMatched: ["Python", "FastAPI", "LangChain", "ChromaDB", "React.js", "Next.js", "Docker"],
-    },
-    { id: "job-4", title: "Graduate Software Engineer", company: "Atlassian", location: "Sydney, NSW (Hybrid)", matchScore: 89, skillsRequired: ["Java", "TypeScript", "React.js", "SQL", "Git"], skillsMatched: ["Java", "TypeScript", "React.js", "SQL", "Git"] },
-    { id: "job-5", title: "Platform Engineer", company: "Northstar Cloud", location: "Sydney, NSW", matchScore: 81, skillsRequired: ["AWS", "Docker", "Kubernetes", "PostgreSQL", "CI/CD"], skillsMatched: ["AWS", "Docker", "PostgreSQL", "CI/CD"] },
-    { id: "job-6", title: "Junior Full Stack Developer", company: "Canva", location: "Sydney, NSW (Hybrid)", matchScore: 87, skillsRequired: ["React.js", "TypeScript", "Node.js", "PostgreSQL", "AWS"], skillsMatched: ["React.js", "TypeScript", "PostgreSQL", "AWS"] },
-    { id: "job-7", title: "Machine Learning Engineer", company: "DataMuse AI", location: "Remote · Australia", matchScore: 76, skillsRequired: ["Python", "PyTorch", "FastAPI", "Docker", "MLOps"], skillsMatched: ["Python", "PyTorch", "FastAPI", "Docker"] },
-    { id: "job-8", title: "Backend Developer", company: "Commonwealth FinTech", location: "Sydney, NSW", matchScore: 85, skillsRequired: ["Java", "Spring Boot", "PostgreSQL", "REST APIs", "AWS"], skillsMatched: ["Java", "Spring Boot", "PostgreSQL", "AWS"] },
-    { id: "job-9", title: "Software Engineer, Cloud", company: "SafetyCulture", location: "Sydney, NSW (Hybrid)", matchScore: 79, skillsRequired: ["Go", "AWS", "Docker", "React.js", "CI/CD"], skillsMatched: ["AWS", "Docker", "React.js", "CI/CD"] },
-    { id: "job-10", title: "AI Product Engineer", company: "Aurora Labs", location: "Remote · Australia", matchScore: 83, skillsRequired: ["Python", "LangChain", "Next.js", "Supabase", "LLM evaluation"], skillsMatched: ["Python", "LangChain", "Next.js", "Supabase"] },
-  ]);
+  // Hoisted Jobs State — real seed pool only, Australia-based roles first, best score first within that.
+  const [jobs] = useState<JobPosting[]>(() =>
+    sortAustraliaFirst(JOB_POSTINGS_SEED).map((posting) => {
+      const matchedCount = Math.round(posting.skills.length * (posting.score / 10));
+      return {
+        id: posting.id,
+        title: posting.title,
+        company: posting.company,
+        location: posting.location,
+        matchScore: Math.round(posting.score * 10),
+        skillsRequired: posting.skills,
+        skillsMatched: posting.skills.slice(0, matchedCount),
+        url: posting.url,
+      };
+    }),
+  );
 
   // Handle Select Draft from Dashboard
   const handleSelectDraft = (id: string) => {
@@ -211,27 +206,45 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
         return;
       }
       setTailoringState({ job, phase: "analyzing" });
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
+      let variant: Awaited<ReturnType<typeof tailorApplication>> | null = null;
+      try {
+        variant = await tailorApplication(getBuilderUserId(), DEMO_SEEDED_APPLICATION_ID);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Could not reach the tailoring backend — showing generic suggestions instead.",
+        );
+      }
       setTailoringState({ job, phase: "rewriting" });
-      await new Promise((resolve) => window.setTimeout(resolve, 900));
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
       const jobDraftId = `draft-${job.id}-${Date.now()}`;
+      const matchSuggestions = variant
+        ? [
+            { id: `${jobDraftId}-rationale`, title: "Why this selection", detail: variant.rationale, scoreBoost: 0, action: "summary" as const },
+            ...(variant.omitted_notable.length > 0
+              ? [{ id: `${jobDraftId}-omitted`, title: "Left out of this version", detail: `Omitted as less relevant: ${variant.omitted_notable.join(", ")}. Add it back manually if you disagree.`, scoreBoost: 0, action: "experience" as const }]
+              : []),
+            { id: `${jobDraftId}-skills`, title: "Skills this job cares about", detail: `Emphasize: ${variant.emphasized_skills.join(", ")}.`, scoreBoost: 3, action: "skills" as const },
+          ]
+        : [
+            { id: `${job.id}-summary`, title: "Align the opening summary", detail: `Lead with ${job.skillsMatched.slice(0, 3).join(", ")} to make the role fit obvious.`, scoreBoost: 4, action: "summary" as const },
+            { id: `${job.id}-impact`, title: "Strengthen experience evidence", detail: "Add one measurable outcome to the most relevant experience bullet.", scoreBoost: 5, action: "experience" as const },
+            { id: `${job.id}-skills`, title: "Review skill gaps honestly", detail: `Check ${job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill)).join(", ") || "the remaining job requirements"}; only add skills you can support.`, scoreBoost: 0, action: "skills" as const },
+          ];
       setDrafts((prev) => [{
           id: jobDraftId,
           title: `${sourceData.fullName} · ${job.company}`,
           role: job.title,
           level: job.title.toLowerCase().includes("senior") ? "Senior (5+ years)" : "Targeted application",
-          source: "Tailored from workspace CV",
+          source: variant ? "AI-tailored from master profile" : "Tailored from workspace CV",
           updated: new Date().toLocaleDateString(),
           exported: "Never",
           matchScore: job.matchScore,
           targetCompany: job.company,
           matchedSkills: job.skillsMatched,
           missingSkills: job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill)),
-          matchSuggestions: [
-            { id: `${job.id}-summary`, title: "Align the opening summary", detail: `Lead with ${job.skillsMatched.slice(0, 3).join(", ")} to make the role fit obvious.`, scoreBoost: 4, action: "summary" },
-            { id: `${job.id}-impact`, title: "Strengthen experience evidence", detail: "Add one measurable outcome to the most relevant experience bullet.", scoreBoost: 5, action: "experience" },
-            { id: `${job.id}-skills`, title: "Review skill gaps honestly", detail: `Check ${job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill)).join(", ") || "the remaining job requirements"}; only add skills you can support.`, scoreBoost: 0, action: "skills" },
-          ],
+          matchSuggestions,
         }, ...prev]);
       setCvDatabase((prev) => ({
           ...prev,
@@ -299,6 +312,7 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
         <InterviewWorkspace
           drafts={drafts}
           cvDatabase={cvDatabase}
+          jobs={jobs}
           initialSessionId={interviewSessionId}
           onSessionIdChange={(sessionId) => router.push(sessionId ? `/interviews/${sessionId}` : "/interviews")}
           onExamModeChange={(active) => setIsExamMode(active)}

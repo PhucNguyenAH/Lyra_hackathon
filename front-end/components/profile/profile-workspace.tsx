@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   BriefcaseBusiness,
   Check,
   FileCheck2,
@@ -11,6 +12,7 @@ import {
   Plus,
   Save,
   Sparkles,
+  Trash2,
   UploadCloud,
   UserRound,
   X,
@@ -30,16 +32,29 @@ import { Input } from "@/components/ui/input";
 import {
   CandidatePreferences,
   CVUploadRecord,
+  CVVariant,
+  MasterProfile,
   ProfileApiError,
   ProfileRecord,
   getCVUploads,
   getProfile,
+  tailorApplication,
+  updateMasterProfile,
   updatePreferences,
   uploadCV,
 } from "@/lib/profile-api";
+import { DEMO_SEEDED_APPLICATION_ID, DEMO_SEEDED_JOB } from "@/lib/job-postings-seed";
 import { cn } from "@/lib/utils";
 
 const USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
+
+const EMPTY_MASTER_PROFILE: MasterProfile = {
+  summary: "",
+  skills: [],
+  experiences: [],
+  projects: [],
+  education: [],
+};
 
 const EMPTY_PREFERENCES: CandidatePreferences = {
   display_name: "",
@@ -178,7 +193,11 @@ export function ProfileWorkspace({
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [variant, setVariant] = useState<CVVariant | null>(null);
+  const [isTailoring, setIsTailoring] = useState(false);
+  const [tailorError, setTailorError] = useState<string | null>(null);
 
   const loadProfile = useCallback(async () => {
     if (!USER_ID) {
@@ -252,6 +271,49 @@ export function ProfileWorkspace({
     }
   };
 
+  const handleClearProfile = async () => {
+    if (!profile || !USER_ID) return;
+    if (
+      !window.confirm(
+        "Clear your master profile? This resets all extracted experience, projects, and skills, and your saved preferences. Uploaded CV files stay on file so you can re-add them.",
+      )
+    ) {
+      return;
+    }
+    setIsClearing(true);
+    try {
+      await updateMasterProfile(USER_ID, EMPTY_MASTER_PROFILE);
+      const nextProfile = await updatePreferences(USER_ID, EMPTY_PREFERENCES);
+      setProfile(nextProfile);
+      setPreferences(EMPTY_PREFERENCES);
+      setVariant(null);
+      onProfileChange?.(nextProfile);
+      toast.success("Profile cleared");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not clear profile");
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const handleGenerateTailoredCV = async () => {
+    if (!USER_ID) return;
+    setIsTailoring(true);
+    setTailorError(null);
+    try {
+      const result = await tailorApplication(USER_ID, DEMO_SEEDED_APPLICATION_ID);
+      setVariant(result);
+    } catch (error) {
+      setTailorError(
+        error instanceof ProfileApiError
+          ? error.message
+          : "Could not reach the tailoring backend.",
+      );
+    } finally {
+      setIsTailoring(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center">
@@ -275,9 +337,22 @@ export function ProfileWorkspace({
           </p>
         </div>
         {profile && (
-          <Badge variant="outline" className="h-7 w-fit bg-white px-3 text-zinc-600">
-            Master profile v{profile.version}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="h-7 w-fit bg-white px-3 text-zinc-600">
+              Master profile v{profile.version}
+            </Badge>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isClearing}
+              onClick={handleClearProfile}
+              className="h-7 gap-1.5 border-rose-200 px-3 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+            >
+              {isClearing ? <LoaderCircle className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+              Clear profile
+            </Button>
+          </div>
         )}
       </div>}
 
@@ -412,6 +487,56 @@ export function ProfileWorkspace({
               <CardHeader><CardTitle>Top skills</CardTitle><CardDescription>Skills backed by evidence in your uploaded CVs.</CardDescription></CardHeader>
               <CardContent className="flex flex-wrap gap-2">
                 {profile.master.skills.length ? profile.master.skills.slice(0, 16).map((skill) => <Badge key={skill.name} variant="secondary" className="h-7 px-2.5">{skill.name}</Badge>) : <p className="text-sm text-zinc-500">No extracted skills yet.</p>}
+              </CardContent>
+            </Card>
+
+            <Card className="border-0 shadow-sm ring-zinc-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="size-4 text-indigo-600" /> Try tailoring</CardTitle>
+                <CardDescription>{DEMO_SEEDED_JOB.title} · {DEMO_SEEDED_JOB.company}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-zinc-500">{DEMO_SEEDED_JOB.description}</p>
+                <Button
+                  type="button"
+                  size="lg"
+                  disabled={isTailoring}
+                  onClick={handleGenerateTailoredCV}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700"
+                >
+                  {isTailoring ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
+                  {isTailoring ? "Selecting the best points…" : "Generate tailored CV"}
+                </Button>
+
+                {tailorError && (
+                  <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
+                    <AlertTriangle className="size-3.5 shrink-0" />
+                    {tailorError}
+                  </div>
+                )}
+
+                {variant && (
+                  <div className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm">
+                    <p className="font-semibold text-zinc-800">{variant.target_summary}</p>
+                    {[...variant.selected_experiences, ...variant.selected_projects]
+                      .sort((a, b) => a.order - b.order)
+                      .map((item) => (
+                        <div key={item.item_id}>
+                          <p className="font-mono text-xs text-zinc-400">{item.item_id}</p>
+                          <p className="mt-0.5 text-xs italic text-zinc-500">{item.why}</p>
+                        </div>
+                      ))}
+                    <div className="flex flex-wrap gap-1.5">
+                      {variant.emphasized_skills.map((skill) => <Badge key={skill} className="h-6 px-2 text-[11px]">{skill}</Badge>)}
+                    </div>
+                    {variant.omitted_notable.length > 0 && (
+                      <p className="text-xs text-zinc-500">
+                        Left out: {variant.omitted_notable.join(", ")}
+                      </p>
+                    )}
+                    <p className="text-xs leading-5 text-zinc-500">{variant.rationale}</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

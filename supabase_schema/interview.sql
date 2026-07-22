@@ -6,13 +6,21 @@ create table if not exists interview_sessions (
     config     jsonb not null,
     state      jsonb not null,
     status     text not null default 'active'
-               check (status in ('active', 'evaluating', 'completed', 'failed')),
+               check (status in ('active', 'evaluating', 'completed', 'failed', 'abandoned')),
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
 
 -- Upgrade databases created from the first hackathon migration.
 alter table interview_sessions add column if not exists user_id uuid;
+
+-- Upgrade the lifecycle constraint for databases created before abandoned
+-- sessions were tracked explicitly.
+alter table interview_sessions
+    drop constraint if exists interview_sessions_status_check;
+alter table interview_sessions
+    add constraint interview_sessions_status_check
+    check (status in ('active', 'evaluating', 'completed', 'failed', 'abandoned'));
 
 create index if not exists idx_interview_sessions_created
     on interview_sessions(created_at desc);

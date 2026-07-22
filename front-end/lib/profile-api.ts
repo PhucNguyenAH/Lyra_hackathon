@@ -169,3 +169,48 @@ export function uploadCV(
 export function getCVUploads(userId: string): Promise<CVUploadRecord[]> {
   return profileRequest<CVUploadRecord[]>("/profile/uploads", userId);
 }
+
+export type SelectedItem = {
+  item_id: string;
+  kept_bullets: string[];
+  order: number;
+  why: string;
+};
+
+export type CVVariant = {
+  target_summary: string;
+  selected_experiences: SelectedItem[];
+  selected_projects: SelectedItem[];
+  emphasized_skills: string[];
+  omitted_notable: string[];
+  rationale: string;
+};
+
+export type CVVariantRecord = {
+  id: string;
+  application_id: string;
+  profile_version: number;
+  variant: CVVariant;
+  created_at: string;
+};
+
+export function tailorApplication(
+  userId: string,
+  applicationId: string,
+): Promise<CVVariant> {
+  return profileRequest<CVVariant>(
+    `/applications/${applicationId}/tailor`,
+    userId,
+    { method: "POST" },
+  );
+}
+
+export function getApplicationVariants(
+  userId: string,
+  applicationId: string,
+): Promise<CVVariantRecord[]> {
+  return profileRequest<CVVariantRecord[]>(
+    `/applications/${applicationId}/variants`,
+    userId,
+  );
+}

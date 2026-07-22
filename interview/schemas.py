@@ -1,5 +1,6 @@
 """Validated contracts for interview generation, turns, persistence, and reports."""
 
+from datetime import UTC, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field, model_validator
@@ -22,6 +23,60 @@ class NextMove(str, Enum):
     HINT = "hint"
     NEXT_TOPIC = "next_topic"
     COMPLETE = "complete"
+
+
+class InterviewStage(str, Enum):
+    PHONE_SCREEN = "phone_screen"
+    EXPERIENCE_TECHNICAL = "experience_technical"
+
+
+class HiringStageCategory(str, Enum):
+    PHONE_SCREEN = "phone_screen"
+    EXPERIENCE_TECHNICAL = "experience_technical"
+    CODING_ASSESSMENT = "coding_assessment"
+    ONSITE = "onsite"
+    OTHER = "other"
+
+
+class HiringStageEvidence(BaseModel):
+    url: str
+    title: str
+
+
+class HiringStage(BaseModel):
+    name: str
+    category: HiringStageCategory
+    description: str
+    evidence: list[HiringStageEvidence] = Field(default_factory=list, max_length=3)
+    confidence: float = Field(ge=0, le=1)
+    practice_supported: bool
+
+
+class HiringProcessResearch(BaseModel):
+    company: str
+    job_title: str
+    summary: str
+    stages: list[HiringStage] = Field(min_length=1, max_length=8)
+    researched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    confidence: float = Field(ge=0, le=1)
+
+
+class HiringProcessRequest(BaseModel):
+    company: str = Field(min_length=1, max_length=300)
+    job_title: str = Field(min_length=1, max_length=300)
+    job_url: str | None = Field(default=None, max_length=2_000)
+
+
+class SessionEventType(str, Enum):
+    SESSION_STARTED = "session_started"
+    ANSWER_SUBMITTED = "answer_submitted"
+    HINT_REQUESTED = "hint_requested"
+    TOPIC_SKIPPED = "topic_skipped"
+    TIMEOUT = "timeout"
+    PAUSED = "paused"
+    RESUMED = "resumed"
+    FINISHED_EARLY = "finished_early"
+    ABANDONED = "abandoned"
 
 
 class Topic(BaseModel):
@@ -61,11 +116,29 @@ class ChatMessage(BaseModel):
     content: str = Field(min_length=1)
 
 
+class DeliveryEvidence(BaseModel):
+    """Observable speaking signals captured with a recorded answer."""
+
+    duration_seconds: float = Field(gt=0, le=300)
+    word_count: int = Field(ge=0)
+    words_per_minute: float = Field(ge=0, le=400)
+    filler_words: int = Field(ge=0)
+    transcript_source: str = Field(default="groq_whisper", pattern="^(groq_whisper|typed)$")
+
+
 class TurnRecord(BaseModel):
     topic_id: str
     answer: str
+    delivery: DeliveryEvidence | None = None
     analysis: TurnAnalysis
     move: NextMove
+
+
+class SessionEvent(BaseModel):
+    type: SessionEventType
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    topic_id: str | None = None
+    detail: dict[str, object] = Field(default_factory=dict)
 
 
 class InterviewState(BaseModel):
@@ -73,6 +146,7 @@ class InterviewState(BaseModel):
     topic_states: list[TopicState]
     messages: list[ChatMessage] = Field(default_factory=list)
     turns: list[TurnRecord] = Field(default_factory=list)
+    events: list[SessionEvent] = Field(default_factory=list)
 
 
 class WeakTopic(BaseModel):
@@ -108,6 +182,11 @@ class SessionConfig(BaseModel):
     user_id: str
     job_description: str | None = None
     role_level: str | None = None
+    interview_stage: InterviewStage = InterviewStage.EXPERIENCE_TECHNICAL
+    job_title: str | None = Field(default=None, max_length=300)
+    company: str | None = Field(default=None, max_length=300)
+    cv_draft_id: str | None = Field(default=None, max_length=300)
+    hiring_process: HiringProcessResearch | None = None
     topics: list[Topic] = Field(min_length=6, max_length=8)
 
 
@@ -116,6 +195,7 @@ class SessionStatus(str, Enum):
     EVALUATING = "evaluating"
     COMPLETED = "completed"
     FAILED = "failed"
+    ABANDONED = "abandoned"
 
 
 class InterviewSession(BaseModel):
@@ -125,15 +205,52 @@ class InterviewSession(BaseModel):
     status: SessionStatus
 
 
+class SessionSummary(BaseModel):
+    """One row of a user's real practice history, for the recent-practice list."""
+
+    id: str
+    job_title: str | None = None
+    company: str | None = None
+    cv_draft_id: str | None = None
+    created_at: str
+    report: FeedbackReport
+
+
 class CreateSessionRequest(BaseModel):
     user_id: str
     job_description: str | None = None
     role_level: str | None = Field(default=None, max_length=200)
     cv_text: str | None = Field(default=None, min_length=1, max_length=100_000)
+    interview_stage: InterviewStage = InterviewStage.EXPERIENCE_TECHNICAL
+    job_title: str | None = Field(default=None, max_length=300)
+    company: str | None = Field(default=None, max_length=300)
+    cv_draft_id: str | None = Field(default=None, max_length=300)
+    hiring_process: HiringProcessResearch | None = None
 
 
 class AnswerRequest(BaseModel):
     answer: str = Field(min_length=1, max_length=20_000)
+    delivery: DeliveryEvidence | None = None
+
+
+class TranscriptionResponse(BaseModel):
+    text: str = Field(min_length=1)
+    duration_seconds: float | None = Field(default=None, ge=0)
+
+
+class SessionEventRequest(BaseModel):
+    type: SessionEventType
+    detail: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def only_client_lifecycle_events(self) -> "SessionEventRequest":
+        if self.type not in {SessionEventType.PAUSED, SessionEventType.RESUMED}:
+            raise ValueError("Only pause and resume events can be recorded directly")
+        return self
+
+
+class AbandonSessionRequest(BaseModel):
+    reason: str = Field(default="candidate_quit", min_length=1, max_length=300)
 
 
 class AnswerResponse(BaseModel):
