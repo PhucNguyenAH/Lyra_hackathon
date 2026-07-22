@@ -23,7 +23,10 @@ RUN pip install --no-cache-dir -r api/requirements.txt
 RUN playwright install chromium
 
 # System packages for the interactive login stream (Xvfb display + VNC server).
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# DEBIAN_FRONTEND=noninteractive is required: x11vnc/fluxbox pull in tzdata,
+# whose post-install otherwise prompts for a timezone and hangs a TTY-less
+# (Railway/CI) build. Scoped to this RUN so it doesn't affect the running app.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         xvfb x11vnc fluxbox \
     && rm -rf /var/lib/apt/lists/*
 
