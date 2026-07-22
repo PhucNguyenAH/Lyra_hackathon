@@ -71,7 +71,7 @@ python create_session.py
 ### Run job scraper
 
 ```
-python scrape_jobs.py
+python misc/scrape_jobs.py
 ```
 
 ## Embedding extractor
@@ -90,14 +90,14 @@ PDF is embedded as a *query* (with Qwen3's retrieval instruction, the
 recommended asymmetric-search setup) to `./resume_embeddings/`.
 
 ```
-python extractor.py --title "AI engineer" --location "Sydney" --pdf resumes/resume.pdf
+python misc/extractor.py --title "AI engineer" --location "Sydney" --pdf resumes/resume.pdf
 ```
 
 To re-embed without launching the browser, pass already-scraped jobs (Job
 schema, single object or list) as JSON instead of `--title`/`--location`:
 
 ```
-python extractor.py --from-json jobs.json --pdf resumes/resume.pdf
+python misc/extractor.py --from-json jobs.json --pdf resumes/resume.pdf
 ```
 
 Other flags: `--limit` (max jobs to scrape), `--session` (LinkedIn session
