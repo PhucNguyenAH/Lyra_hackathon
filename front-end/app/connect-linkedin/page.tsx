@@ -22,6 +22,8 @@ export default function ConnectLinkedInPage() {
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      (rfbRef.current as { disconnect?: () => void })?.disconnect?.();
+      rfbRef.current = null;
     };
   }, []);
 
@@ -36,8 +38,8 @@ export default function ConnectLinkedInPage() {
       setError(res.status === 401 ? "Invalid admin token" : `Start failed (${res.status})`);
       return;
     }
-    // @ts-expect-error
-    const { default: RFB } = await import("@novnc/novnc/core/rfb");
+    // @ts-expect-error - @novnc/novnc has no type declarations for its package entry point
+    const { default: RFB } = await import("@novnc/novnc");
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${window.location.host}/api/auth/session/vnc?token=${encodeURIComponent(token)}`;
     rfbRef.current = new RFB(screenRef.current as HTMLElement, url);
@@ -62,6 +64,8 @@ export default function ConnectLinkedInPage() {
       headers: { "X-Admin-Token": token },
     });
     if (pollRef.current) clearInterval(pollRef.current);
+    (rfbRef.current as { disconnect?: () => void })?.disconnect?.();
+    rfbRef.current = null;
     setState("cancelled");
   }
 
