@@ -29,3 +29,7 @@ class ScraperSession:
             finally:
                 for _ in range(acquired):
                     self.semaphore.release()
+
+    def mark_disconnected(self) -> None:
+        """Mark the session unusable (e.g. after an expired-session scrape)."""
+        self.has_session = False

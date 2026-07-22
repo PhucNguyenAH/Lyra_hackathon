@@ -49,3 +49,13 @@ async def test_reload_waits_for_in_flight_scrape():
     s.semaphore.release()
     await asyncio.wait_for(reload_task, timeout=0.5)
     assert b.loaded_from == "sess.json"
+
+
+async def test_mark_disconnected_sets_has_session_false():
+    b = FakeBrowser()
+    s = ScraperSession(browser=b, max_concurrent=1, session_file="sess.json", has_session=True)
+    assert s.has_session is True
+    s.mark_disconnected()
+    assert s.has_session is False
+    s.mark_disconnected()  # idempotent
+    assert s.has_session is False
