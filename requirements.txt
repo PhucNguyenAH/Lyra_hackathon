@@ -8,6 +8,7 @@ aiofiles>=23.0.0
 
 # FastAPI inbox watcher
 fastapi>=0.115.0
+python-multipart>=0.0.12
 uvicorn[standard]>=0.32.0
 groq>=0.13.0
 instructor>=1.7.0
@@ -33,3 +34,4 @@ google-genai>=1.0.0
 # Embedding / PDF extraction
 numpy>=1.24.0
 pypdf>=4.0.0
+markitdown[pdf]>=0.1.6

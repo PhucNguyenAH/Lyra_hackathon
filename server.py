@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from email_services.api import configure_email_services, inbox_watcher_lifespan
 from interview.router import configure_interview
+from profile.router import configure_profile
 
 
 app = FastAPI(
@@ -13,3 +14,4 @@ app = FastAPI(
 
 configure_email_services(app)
 configure_interview(app)
+configure_profile(app)

@@ -1,15 +1,17 @@
 -- =====================================================================
 -- Job Pipeline + Inbox Watcher — Supabase schema
 -- Run once in the Supabase SQL Editor.
--- Pipeline: scored -> applied -> interview -> offer / rejected
+-- Pipeline: not_applied -> applied -> interview -> offer -> accepted, with rejected/withdrawn exits
 -- =====================================================================
 
 create type application_status as enum (
-    'scored',
+    'not_applied',
     'applied',
     'interview',
     'offer',
-    'rejected'
+    'rejected',
+    'accepted',
+    'withdrawn'
 );
 
 -- Application status tracked directly on a job row.
@@ -63,7 +65,7 @@ create table jobs (
 create table applications (
     id               uuid primary key default gen_random_uuid(),
     job_id           uuid not null references jobs(id) on delete cascade,
-    status           application_status not null default 'scored',
+    status           application_status not null default 'not_applied',
     applied_at       timestamptz,
     last_activity_at timestamptz not null default now(),
     notes            text,
