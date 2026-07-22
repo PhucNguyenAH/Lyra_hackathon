@@ -25,6 +25,7 @@ async def create_job(req: JobRequest, background: BackgroundTasks, request: Requ
         store=store,
         browser=scraper.browser,
         semaphore=scraper.semaphore,
+        on_expired=scraper.mark_disconnected,
     )
     return {"job_id": job_id, "status": "pending"}
 
@@ -35,3 +36,9 @@ async def get_job(job_id: str, request: Request):
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return job
+
+
+@router.get("/connection")
+async def connection_status(request: Request):
+    """Unauthenticated boolean: does the scraper have a usable LinkedIn session?"""
+    return {"connected": bool(request.app.state.scraper.has_session)}
