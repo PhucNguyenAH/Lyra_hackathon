@@ -8,8 +8,11 @@ logger = logging.getLogger("api.main")
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
+from linkedin_scraper import wait_for_manual_login
 from linkedin_scraper.core.browser import BrowserManager
 
+from .auth.login_session import LoginSessionManager
+from .auth.routes import router as auth_router
 from .models import JobCreatedResponse, JobRequest, JobStatusResponse
 from .scraper_session import ScraperSession
 from .scraper_worker import run_job
@@ -51,6 +54,14 @@ def _materialize_session_file() -> None:
     logger.info("Wrote session file %s (%d bytes) from LINKEDIN_SESSION_JSON", abspath, json_len)
 
 
+async def _start_x11vnc():
+    """Start x11vnc against the Xvfb display, bound to localhost:5900."""
+    return await asyncio.create_subprocess_exec(
+        "x11vnc", "-display", ":99", "-forever", "-shared",
+        "-nopw", "-localhost", "-rfbport", "5900", "-quiet",
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _materialize_session_file()
@@ -73,6 +84,15 @@ async def lifespan(app: FastAPI):
                        "Log in via /connect-linkedin.", SESSION_FILE)
     app.state.scraper = scraper
     app.state.store = JobStore()
+    app.state.login_manager = LoginSessionManager(
+        browser_factory=lambda: BrowserManager(
+            headless=False, viewport={"width": 1280, "height": 800}
+        ),
+        vnc_starter=_start_x11vnc,
+        login_waiter=wait_for_manual_login,
+        on_saved=scraper.reload_from_file,
+        save_path=SESSION_FILE,
+    )
     try:
         yield
     finally:
@@ -80,6 +100,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Job Scraper API", lifespan=lifespan)
+app.include_router(auth_router)
 
 
 @app.post("/jobs", status_code=202, response_model=JobCreatedResponse)
