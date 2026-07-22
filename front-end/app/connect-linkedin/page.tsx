@@ -40,8 +40,19 @@ export default function ConnectLinkedInPage() {
     }
     // @ts-expect-error - @novnc/novnc has no type declarations for its package entry point
     const { default: RFB } = await import("@novnc/novnc");
-    const proto = window.location.protocol === "https:" ? "wss" : "ws";
-    const url = `${proto}://${window.location.host}/api/auth/session/vnc?token=${encodeURIComponent(token)}`;
+    // The VNC websocket connects DIRECTLY to the backend when a public backend
+    // URL is configured, because Next.js rewrites do not reliably forward
+    // WebSocket upgrades to external hosts. The HTTP start/status/cancel calls
+    // above still go through the same-origin /api/* rewrite.
+    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL; // e.g. https://backend.up.railway.app
+    let url: string;
+    if (backendBase) {
+      const wsBase = backendBase.replace(/^http/, "ws"); // https->wss, http->ws
+      url = `${wsBase}/auth/session/vnc?token=${encodeURIComponent(token)}`; // NOTE: /auth not /api/auth when going direct
+    } else {
+      const proto = window.location.protocol === "https:" ? "wss" : "ws";
+      url = `${proto}://${window.location.host}/api/auth/session/vnc?token=${encodeURIComponent(token)}`;
+    }
     rfbRef.current = new RFB(screenRef.current as HTMLElement, url);
     setState("awaiting_login");
     pollRef.current = setInterval(pollStatus, 2000);
@@ -53,8 +64,13 @@ export default function ConnectLinkedInPage() {
     const data = await res.json();
     setState(data.state);
     if (data.error) setError(data.error);
-    if (["saved", "error", "cancelled"].includes(data.state) && pollRef.current) {
-      clearInterval(pollRef.current);
+    if (["saved", "error", "cancelled"].includes(data.state)) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      // The backend tears down the browser+VNC once the session reaches a
+      // terminal state, so disconnect the RFB canvas here too (not just on
+      // manual cancel/unmount).
+      (rfbRef.current as { disconnect?: () => void })?.disconnect?.();
+      rfbRef.current = null;
     }
   }
 
