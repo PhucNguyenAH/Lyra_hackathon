@@ -14,6 +14,7 @@ from linkedin_scraper.core.browser import BrowserManager
 from .auth.login_session import LoginSessionManager
 from .auth.routes import router as auth_router
 from .jobs import router as jobs_router
+from .jobs_repository import build_jobs_repository
 from .scraper_session import ScraperSession
 from .session_store import build_session_store
 from .store import JobStore
@@ -144,6 +145,7 @@ async def lifespan(app: FastAPI):
                        "Log in via /connect-linkedin.")
     app.state.scraper = scraper
     app.state.store = JobStore()
+    app.state.jobs_repo = build_jobs_repository(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     app.state.login_manager = LoginSessionManager(
         browser_factory=lambda: BrowserManager(
             headless=False, viewport={"width": 1280, "height": 800}

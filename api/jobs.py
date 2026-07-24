@@ -16,6 +16,7 @@ async def create_job(req: JobRequest, background: BackgroundTasks, request: Requ
             detail="no LinkedIn session — open /connect-linkedin to log in",
         )
     store = request.app.state.store
+    jobs_repo = getattr(request.app.state, "jobs_repo", None)
     job_id = store.create()
     background.add_task(
         run_job,
@@ -26,8 +27,19 @@ async def create_job(req: JobRequest, background: BackgroundTasks, request: Requ
         browser=scraper.browser,
         semaphore=scraper.semaphore,
         on_expired=scraper.mark_disconnected,
+        count=req.count,
+        jobs_repo=jobs_repo,
     )
     return {"job_id": job_id, "status": "pending"}
+
+
+@router.get("/jobs")
+async def list_jobs(request: Request):
+    """Persisted scraped jobs (from Supabase), for the dashboard feed."""
+    jobs_repo = getattr(request.app.state, "jobs_repo", None)
+    if jobs_repo is None:
+        return []
+    return jobs_repo.list_jobs()
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
