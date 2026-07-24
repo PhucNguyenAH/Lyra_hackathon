@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Search, Heart, Briefcase, MapPin, Sparkles, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Search, Heart, Briefcase, MapPin, Sparkles, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface JobPosting {
@@ -18,6 +18,7 @@ export interface JobPosting {
   skillsMatched: string[];
   description?: string;
   url?: string;
+  matchPending?: boolean;
 }
 
 interface JobsDashboardProps {
@@ -36,11 +37,15 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
     );
   };
 
-  const filteredJobs = jobs.filter(
-    (job) =>
-      job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      job.company.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredJobs = jobs
+    .filter(
+      (job) =>
+        job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        job.company.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    // Highest match first. Jobs still being scored (matchScore 0) stay at the
+    // bottom and rise as their LLM match resolves.
+    .sort((a, b) => b.matchScore - a.matchScore);
 
   return (
     <div className="space-y-6">
@@ -99,18 +104,25 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
 
                   {/* Match Percentage Badge */}
                   <div className="text-right">
-                    <Badge
-                      className={cn(
-                        "font-extrabold text-xs px-2.5 py-1 text-white border-none shadow-sm",
-                        job.matchScore >= 80
-                          ? "bg-emerald-600 hover:bg-emerald-600 shadow-emerald-500/10"
-                          : job.matchScore >= 50
-                          ? "bg-amber-500 hover:bg-amber-500 shadow-amber-500/10"
-                          : "bg-red-500 hover:bg-red-500 shadow-red-500/10"
-                      )}
-                    >
-                      {job.matchScore}% Match
-                    </Badge>
+                    {job.matchPending ? (
+                      <Badge className="font-extrabold text-xs px-2.5 py-1 text-white border-none shadow-sm bg-zinc-400 hover:bg-zinc-400">
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        Matching…
+                      </Badge>
+                    ) : (
+                      <Badge
+                        className={cn(
+                          "font-extrabold text-xs px-2.5 py-1 text-white border-none shadow-sm",
+                          job.matchScore >= 80
+                            ? "bg-emerald-600 hover:bg-emerald-600 shadow-emerald-500/10"
+                            : job.matchScore >= 50
+                            ? "bg-amber-500 hover:bg-amber-500 shadow-amber-500/10"
+                            : "bg-red-500 hover:bg-red-500 shadow-red-500/10"
+                        )}
+                      >
+                        {job.matchScore}% Match
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </CardHeader>

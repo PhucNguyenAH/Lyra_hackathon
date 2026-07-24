@@ -185,6 +185,21 @@ export function getCVUploads(userId: string): Promise<CVUploadRecord[]> {
   return profileRequest<CVUploadRecord[]>("/profile/uploads", userId);
 }
 
+export type JobMatch = {
+  match_score: number;
+  required_skills: string[];
+  matched_skills: string[];
+};
+
+// LLM skill-match: scores the user's resume against one job description.
+export function matchJob(userId: string, jdText: string): Promise<JobMatch> {
+  return profileRequest<JobMatch>("/profile/match", userId, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jd_text: jdText }),
+  });
+}
+
 export function deleteCVUpload(userId: string, uploadId: string): Promise<void> {
   return profileRequest<void>(`/profile/uploads/${uploadId}`, userId, {
     method: "DELETE",
