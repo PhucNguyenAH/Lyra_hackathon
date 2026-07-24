@@ -13,6 +13,7 @@ import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { tailorPreview } from "@/lib/profile-api";
+import { listJobs } from "@/lib/jobs-api";
 
 type TabId = "drafts" | "applications" | "cv-editor" | "interview";
 
@@ -95,7 +96,7 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
   }, [cvDatabase]);
 
   // Hoisted Jobs State — real seed pool only, Australia-based roles first, best score first within that.
-  const [jobs] = useState<JobPosting[]>(() =>
+  const [jobs, setJobs] = useState<JobPosting[]>(() =>
     sortAustraliaFirst(JOB_POSTINGS_SEED).map((posting) => {
       const matchedCount = Math.round(posting.skills.length * (posting.score / 10));
       return {
@@ -110,6 +111,29 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       };
     }),
   );
+
+  // Fetch persisted jobs from Supabase (via scraper backend) on mount; keep the
+  // seed above as the fallback when the DB has nothing yet.
+  useEffect(() => {
+    listJobs()
+      .then((rows) => {
+        if (rows.length) {
+          setJobs(
+            rows.map((r) => ({
+              id: r.id,
+              title: r.role,
+              company: r.company,
+              location: r.location ?? "",
+              matchScore: 0,
+              skillsRequired: [],
+              skillsMatched: [],
+              url: r.url ?? undefined,
+            })),
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Handle Select Draft from Dashboard
   const handleSelectDraft = (id: string) => {
