@@ -1,10 +1,22 @@
 """Persist and list scraped jobs in the Supabase `jobs` table."""
 import logging
 from typing import Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger("api.jobs_repository")
 
 TABLE = "jobs"
+
+
+def _is_scraped_linkedin_job(row: dict) -> bool:
+    """Exclude legacy demo rows that were never produced by the scraper."""
+    url = str(row.get("url") or "")
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc.lower() in {"linkedin.com", "www.linkedin.com"}
+        and parsed.path.startswith("/jobs/view/")
+    )
 
 
 class JobsRepository:
@@ -47,7 +59,8 @@ class JobsRepository:
             .limit(limit)
             .execute()
         )
-        return resp.data or []
+        rows = resp.data or []
+        return [row for row in rows if isinstance(row, dict) and _is_scraped_linkedin_job(row)]
 
 
 def build_jobs_repository(supabase_url, service_key) -> Optional[JobsRepository]:

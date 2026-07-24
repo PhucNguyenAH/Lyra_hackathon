@@ -250,9 +250,8 @@ export function getApplicationVariants(
   );
 }
 
-// Tailors against any JD text directly — no seeded `jobs`/`applications` row
-// required, so every job in the (frontend-only) seed pool can be tailored for
-// real, not just the one row that happens to exist in Supabase.
+// Tailors against arbitrary JD text, so scraper-backed jobs do not need an
+// application row before the user asks for a CV variant.
 export function tailorPreview(userId: string, jdText: string): Promise<CVVariant> {
   return profileRequest<CVVariant>("/profile/tailor-preview", userId, {
     method: "POST",

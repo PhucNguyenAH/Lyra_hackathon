@@ -1204,12 +1204,12 @@ export function InterviewWorkspace({ drafts, cvDatabase, jobs, initialSessionId,
                 </CardContent>
               </Card>
 
-              {reportSummary && reportSummary.cv_suggestions.length > 0 && (
+              {(reportSummary?.cv_suggestions?.length ?? 0) > 0 && (
                 <section className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 dark:border-violet-900/60 dark:bg-violet-950/20">
                   <h3 className="flex items-center gap-2 text-sm font-bold text-violet-900 dark:text-violet-200"><Sparkles className="h-4 w-4" />Feedback connected to your CV</h3>
                   <p className="mt-1 text-xs text-violet-900/70 dark:text-violet-200/70">These exact-bullet suggestions will appear the next time you tailor your CV.</p>
                   <div className="mt-3 space-y-2">
-                    {reportSummary.cv_suggestions.map((suggestion) => (
+                    {reportSummary?.cv_suggestions?.map((suggestion) => (
                       <div key={`${suggestion.item_id}-${suggestion.issue}`} className="rounded-lg border border-violet-200/70 bg-white/70 p-3 text-xs dark:border-violet-900 dark:bg-zinc-950/50">
                         <p className="font-medium text-zinc-800 dark:text-zinc-200">“{suggestion.source_bullet}”</p>
                         <p className="mt-1 text-zinc-600 dark:text-zinc-400">{suggestion.suggestion}</p>

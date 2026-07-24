@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
 import { type JobPosting } from "@/components/jobs-dashboard";
-import { JOB_POSTINGS_SEED, sortAustraliaFirst } from "@/lib/job-postings-seed";
 import { CVEditorWorkspace } from "@/components/cv-editor/cv-editor-workspace";
 import { InterviewWorkspace } from "@/components/interview-practice/interview-workspace";
 import { ApplicationPipeline } from "@/components/application-pipeline";
@@ -99,46 +98,44 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
     window.localStorage.setItem(CV_DATABASE_STORAGE_KEY, JSON.stringify(cvDatabase));
   }, [cvDatabase]);
 
-  // Hoisted Jobs State — real seed pool only, Australia-based roles first, best score first within that.
-  const [jobs, setJobs] = useState<JobPosting[]>(() =>
-    sortAustraliaFirst(JOB_POSTINGS_SEED).map((posting) => {
-      const matchedCount = Math.round(posting.skills.length * (posting.score / 10));
-      return {
-        id: posting.id,
-        title: posting.title,
-        company: posting.company,
-        location: posting.location,
-        matchScore: Math.round(posting.score * 10),
-        skillsRequired: posting.skills,
-        skillsMatched: posting.skills.slice(0, matchedCount),
-        description: posting.description,
-        url: posting.url,
-      };
-    }),
-  );
+  const [jobs, setJobs] = useState<JobPosting[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [jobsRefreshVersion, setJobsRefreshVersion] = useState(0);
 
-  // Fetch persisted jobs from Supabase (via scraper backend) on mount; keep the
-  // seed above as the fallback when the DB has nothing yet.
+  // Supabase, populated by the scraper, is the only job source. Poll so jobs
+  // appear automatically when a scrape started from /profile completes.
   useEffect(() => {
-    listJobs()
-      .then((rows) => {
-        if (rows.length) {
-          setJobs(
-            rows.map((r) => ({
-              id: r.id,
-              title: r.role,
-              company: r.company,
-              location: r.location ?? "",
-              matchScore: 0,
-              skillsRequired: [],
-              skillsMatched: [],
-              url: r.url ?? undefined,
-            })),
-          );
-        }
-      })
-      .catch(() => {});
-  }, []);
+    let active = true;
+    const loadJobs = async () => {
+      try {
+        const rows = await listJobs();
+        if (!active) return;
+        setJobs(rows.map((row) => ({
+          id: row.id,
+          title: row.role,
+          company: row.company,
+          location: row.location ?? "",
+          matchScore: 0,
+          skillsRequired: [],
+          skillsMatched: [],
+          description: row.description ?? undefined,
+          url: row.url ?? undefined,
+        })));
+        setJobsError(null);
+      } catch (error) {
+        if (active) setJobsError(error instanceof Error ? error.message : "Could not load scraped jobs");
+      } finally {
+        if (active) setJobsLoading(false);
+      }
+    };
+    void loadJobs();
+    const poll = window.setInterval(() => void loadJobs(), 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+    };
+  }, [jobsRefreshVersion]);
 
   // Handle Select Draft from Dashboard
   const handleSelectDraft = (id: string) => {
@@ -328,6 +325,12 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       {activeTab === "drafts" && (
         <DraftsDashboard
           jobs={jobs}
+          jobsLoading={jobsLoading}
+          jobsError={jobsError}
+          onRefreshJobs={() => {
+            setJobsLoading(true);
+            setJobsRefreshVersion((version) => version + 1);
+          }}
           onTailorCV={handleTailorCV}
         />
       )}

@@ -96,12 +96,12 @@ export type FeedbackReport = {
     drill_suggestion: string;
   }>;
   one_thing: string;
-  score_evidence: Array<{
+  score_evidence?: Array<{
     dimension: "specificity" | "technical_depth" | "communication" | "handling_pressure";
     score: number;
     evidence: string;
   }>;
-  cv_suggestions: Array<{
+  cv_suggestions?: Array<{
     item_id: string;
     source_bullet: string;
     issue: string;
