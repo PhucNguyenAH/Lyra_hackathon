@@ -4,6 +4,7 @@ This index tracks key architectural and UI decisions made during the development
 
 | Date | Title | Type | Status |
 |------|-------|------|--------|
+| 2026-07-25 | LLM job–resume skill match on the overview | ARCH, CONTRACT, UI | accepted |
 | 2026-07-22 | Resume upload triggers a scraped job feed | UI, CONTRACT | proposed |
 | 2026-07-22 | LinkedIn connection status badge in the dashboard | UI, CONTRACT | proposed |
 | 2026-07-22 | Account Settings entry for LinkedIn connection | UI, CONTRACT | proposed |

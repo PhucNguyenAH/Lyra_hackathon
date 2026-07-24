@@ -22,12 +22,19 @@ from profile.db import (
     save_preferences,
 )
 from profile.ingest import ingest_cv
+from profile.match import JobMatch, match_profile_to_jd
 from profile.schemas import CandidatePreferences, CVVariant, MasterProfile, ProfileRecord
 from profile.tailor import TailorValidationError, generate_tailored_variant, tailor_cv
 
 
 class TailorPreviewRequest(BaseModel):
     """A one-off tailoring request against arbitrary JD text, no application_id needed."""
+
+    jd_text: str = Field(min_length=1, max_length=20_000)
+
+
+class MatchRequest(BaseModel):
+    """Score the candidate against one job description's text."""
 
     jd_text: str = Field(min_length=1, max_length=20_000)
 
@@ -146,6 +153,19 @@ def update_preferences(
         return save_preferences(profile.id, preferences)
     except ProfileNotFoundError as error:
         raise _profile_error(error) from error
+
+
+@router.post(f"{API_PREFIX}/match", response_model=JobMatch)
+def match_job(
+    request: MatchRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> JobMatch:
+    """Score how well the candidate's resume matches one job description."""
+    try:
+        profile = get_master_for_user(user_id)
+    except ProfileNotFoundError as error:
+        raise _profile_error(error) from error
+    return match_profile_to_jd(profile.master, request.jd_text)
 
 
 @router.get(f"{API_PREFIX}/uploads")
