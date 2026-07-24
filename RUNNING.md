@@ -1,12 +1,15 @@
 # Running Athena AI locally
 
-The project has **three processes**: two backends + the Next.js frontend.
+The project has **two processes**: one combined backend + the Next.js frontend.
 
 | Process | Command | Port | Serves |
 |---------|---------|------|--------|
-| Scraper API | `uvicorn api.main:app --port 8000` | 8000 | LinkedIn login (`/auth/session/*`), `/jobs`, `/connection` |
-| Athena backend | `uvicorn server:app --reload --port 8008` | 8008 | email watcher, AI interview, profile |
+| Backend | `uvicorn server:app --port 8000` | 8000 | LinkedIn login (`/auth/session/*`), `/jobs`, `/connection`, email watcher, AI interview, profile |
 | Frontend | `cd front-end && npm run dev` | 3000 | Next.js dashboard |
+
+`server:app` is the single combined FastAPI app — the scraper and the Athena
+feature set share one process, one port, one lifespan. (`api.main:app` still runs
+standalone as a scraper-only fallback, but you don't need it.)
 
 ## 1. One-time setup
 
@@ -34,37 +37,33 @@ Load `.env` into a shell before starting a backend: `set -a; source .env; set +a
 Supabase: run the SQL files in `supabase_schema/` once in the Supabase SQL editor
 (includes `linkedin_sessions.sql` for the encrypted session store).
 
-## 2. Run (three terminals)
+## 2. Run (two terminals)
 
 ```bash
-# Terminal 1 — scraper API
+# Terminal 1 — combined backend (needs a display for the login browser; see §4)
 set -a; source .env; set +a
-ADMIN_TOKEN=dev-secret uvicorn api.main:app --host 127.0.0.1 --port 8000
+Xvfb :99 -screen 0 1280x800x24 -nolisten tcp &
+DISPLAY=:99 ADMIN_TOKEN=dev-secret uvicorn server:app --host 127.0.0.1 --port 8000
 
-# Terminal 2 — Athena backend
-set -a; source .env; set +a
-uvicorn server:app --reload --port 8008
-
-# Terminal 3 — frontend
+# Terminal 2 — frontend
 cd front-end && npm run dev
 ```
 
-Then: frontend http://localhost:3000 · scraper docs http://127.0.0.1:8000/docs ·
-Athena docs http://127.0.0.1:8008/docs
+Then: frontend http://localhost:3000 · backend docs http://127.0.0.1:8000/docs
 
 ## 3. Frontend → backend wiring
 
 `front-end/.env.local`:
 
 ```
-BACKEND_URL=http://127.0.0.1:8000            # /api/* proxy target
+BACKEND_URL=http://127.0.0.1:8000             # /api/* proxy target
 NEXT_PUBLIC_BACKEND_URL=http://127.0.0.1:8000 # VNC websocket (login stream), connects direct
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000     # profile/interview client, connects direct
+NEXT_PUBLIC_DEMO_USER_ID=<demo-profile-uuid>  # profile the dashboard loads
 ```
 
-⚠️ The `/api/*` rewrite targets **one** backend. Point `BACKEND_URL` at whichever
-you're using: `:8000` for LinkedIn/scraper features, `:8008` for
-email/interview/profile. Serving both under one origin (gateway or per-path
-rewrites) is an open integration item.
+All three URLs point at the **same** combined backend now — there's only one
+port to wire.
 
 ## 4. LinkedIn login stream needs a display
 
@@ -83,7 +82,7 @@ rewrites) is an open integration item.
   ```bash
   Xvfb :99 -screen 0 1280x800x24 &
   set -a; source .env; set +a
-  DISPLAY=:99 ADMIN_TOKEN=dev-secret uvicorn api.main:app --host 127.0.0.1 --port 8000
+  DISPLAY=:99 ADMIN_TOKEN=dev-secret uvicorn server:app --host 127.0.0.1 --port 8000
   ```
 
 Once you've logged in once, the session is stored **encrypted in Supabase** and
@@ -102,6 +101,8 @@ curl http://127.0.0.1:8000/connection   # {"connected": true|false}
 
 ## Deploy (Railway)
 
-Scraper API deploys via the root `Dockerfile` (Xvfb/x11vnc baked in). Set
-`ADMIN_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SESSION_ENCRYPTION_KEY`
-as service variables. See `api/DEPLOY.md` for details.
+The combined backend deploys via the root `Dockerfile` (Xvfb/x11vnc baked in; it
+runs `server:app` via `entrypoint.sh`). Set `ADMIN_TOKEN`, `SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`, `SESSION_ENCRYPTION_KEY`, and the `GROQ_API_KEY` /
+`GEMINI_API_KEY` / `IMAP_*` vars for the Athena features as service variables.
+See `api/DEPLOY.md` for details.

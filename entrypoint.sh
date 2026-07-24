@@ -10,4 +10,5 @@ fluxbox >/dev/null 2>&1 &
 
 # x11vnc is started per-login by the app (LoginSessionManager); it targets :99.
 # The app binds the platform port; VNC stays on localhost.
-exec uvicorn api.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+# server:app is the combined backend (scraper + profile + interview + email).
+exec uvicorn server:app --host 0.0.0.0 --port "${PORT:-8000}"
