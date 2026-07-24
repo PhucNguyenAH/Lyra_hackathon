@@ -37,11 +37,15 @@ export function JobsDashboard({ jobs, onTailorCV }: JobsDashboardProps) {
     );
   };
 
-  const filteredJobs = jobs.filter(
-    (job) =>
-      job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      job.company.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredJobs = jobs
+    .filter(
+      (job) =>
+        job.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        job.company.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    // Highest match first. Jobs still being scored (matchScore 0) stay at the
+    // bottom and rise as their LLM match resolves.
+    .sort((a, b) => b.matchScore - a.matchScore);
 
   return (
     <div className="space-y-6">
