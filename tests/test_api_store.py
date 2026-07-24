@@ -9,7 +9,7 @@ def test_create_returns_id_and_pending_status():
     store = JobStore()
     job_id = store.create()
     assert isinstance(job_id, str) and len(job_id) > 0
-    assert store.get(job_id) == {"status": "pending", "result": None, "error": None}
+    assert store.get(job_id) == {"status": "pending", "results": None, "error": None}
 
 
 def test_create_returns_unique_ids():
@@ -20,10 +20,10 @@ def test_create_returns_unique_ids():
 def test_set_updates_fields():
     store = JobStore()
     job_id = store.create()
-    store.set(job_id, status="done", result={"title": "AI Engineer"})
+    store.set(job_id, status="done", results=[{"title": "AI Engineer"}])
     stored = store.get(job_id)
     assert stored["status"] == "done"
-    assert stored["result"] == {"title": "AI Engineer"}
+    assert stored["results"] == [{"title": "AI Engineer"}]
     assert stored["error"] is None
 
 

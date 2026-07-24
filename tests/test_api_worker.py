@@ -51,10 +51,32 @@ async def test_run_job_success_sets_done_with_mapped_result():
 
     stored = store.get(job_id)
     assert stored["status"] == "done"
-    assert stored["result"]["title"] == "AI Engineer"
-    assert stored["result"]["job_url"] == "https://www.linkedin.com/jobs/view/123"
+    assert stored["results"][0]["title"] == "AI Engineer"
+    assert stored["results"][0]["job_url"] == "https://www.linkedin.com/jobs/view/123"
     assert browser.page.closed is True
     search.search.assert_awaited_once_with(keywords="AI Engineer", location="Sydney", limit=1)
+
+
+async def test_run_job_scrapes_multiple_and_persists():
+    store = JobStore(); job_id = store.create(); browser = FakeBrowser()
+    urls = ["https://www.linkedin.com/jobs/view/1",
+            "https://www.linkedin.com/jobs/view/2"]
+    search = MagicMock(); search.search = AsyncMock(return_value=urls)
+    def make_job(u):
+        return Job(linkedin_url=u, job_title="Eng", company="Acme", location="Sydney")
+    scraper = MagicMock()
+    scraper.scrape = AsyncMock(side_effect=[make_job(urls[0]), make_job(urls[1])])
+    persisted = []
+    class Repo:
+        def upsert(self, job): persisted.append(job["job_url"])
+    with patch("api.scraper_worker.JobSearchScraper", return_value=search), \
+         patch("api.scraper_worker.JobScraper", return_value=scraper):
+        await run_job(job_id, "Eng", "Sydney", store=store, browser=browser,
+                      semaphore=_semaphore(), count=2, jobs_repo=Repo())
+    stored = store.get(job_id)
+    assert stored["status"] == "done"
+    assert [r["job_url"] for r in stored["results"]] == urls
+    assert persisted == urls
 
 
 async def test_run_job_no_results_sets_error():
@@ -150,7 +172,8 @@ async def test_run_job_search_exception_sets_error():
     assert browser.page.closed is True
 
 
-async def test_run_job_scrape_exception_sets_error():
+async def test_run_job_scrape_exception_is_skipped_not_fatal():
+    """A per-URL scrape failure is skipped (logged), not fatal to the job."""
     store = JobStore()
     job_id = store.create()
     browser = FakeBrowser()
@@ -166,8 +189,9 @@ async def test_run_job_scrape_exception_sets_error():
                       store=store, browser=browser, semaphore=_semaphore())
 
     stored = store.get(job_id)
-    assert stored["status"] == "error"
-    assert "scrape boom" in stored["error"]
+    assert stored["status"] == "done"
+    assert stored["results"] == []
+    assert stored["error"] is None
     assert browser.page.closed is True
 
 
@@ -209,5 +233,5 @@ async def test_run_job_page_close_failure_does_not_escape():
 
     stored = store.get(job_id)
     assert stored["status"] == "done"
-    assert stored["result"]["title"] == "AI Engineer"
-    assert stored["result"]["job_url"] == "https://www.linkedin.com/jobs/view/123"
+    assert stored["results"][0]["title"] == "AI Engineer"
+    assert stored["results"][0]["job_url"] == "https://www.linkedin.com/jobs/view/123"

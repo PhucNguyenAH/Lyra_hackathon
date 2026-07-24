@@ -69,7 +69,7 @@ def test_post_then_get_returns_done_result():
             assert got.status_code == 200
             data = got.json()
             assert data["status"] == "done"
-            assert data["result"] == {
+            assert data["results"] == [{
                 "job_url": "https://www.linkedin.com/jobs/view/123",
                 "title": "AI Engineer",
                 "company": "Acme",
@@ -77,7 +77,7 @@ def test_post_then_get_returns_done_result():
                 "posted": "2 days ago",
                 "applicants": "42",
                 "description": "Build.",
-            }
+            }]
     finally:
         for p in patches:
             p.stop()

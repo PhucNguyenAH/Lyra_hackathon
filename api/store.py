@@ -12,7 +12,7 @@ class JobStore:
     def create(self) -> str:
         """Create a pending job and return its id."""
         job_id = str(uuid.uuid4())
-        self._jobs[job_id] = {"status": "pending", "result": None, "error": None}
+        self._jobs[job_id] = {"status": "pending", "results": None, "error": None}
         return job_id
 
     def set(self, job_id: str, **fields) -> None:
