@@ -29,8 +29,11 @@ Minimum `.env` values:
   `SESSION_ENCRYPTION_KEY`
   (generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`).
   Also choose an `ADMIN_TOKEN` when you start the scraper API.
-- **Athena backend (only if using email/interview/profile):** `GROQ_API_KEY`,
-  `GEMINI_API_KEY`, and the `IMAP_*` vars for the Gmail watcher.
+- **AI features:**
+  - `GROQ_API_KEY` — interview practice + CV extraction/tailoring (Groq/Llama).
+  - `GEMINI_API_KEY` — the overview's job↔resume skill match (Gemini). Without it,
+    job cards stay at 0% match.
+  - `IMAP_*` vars — the Gmail inbox watcher (or set `INBOX_WATCHER_ENABLED=false`).
 
 Load `.env` into a shell before starting a backend: `set -a; source .env; set +a`
 
@@ -97,6 +100,12 @@ curl -X POST http://127.0.0.1:8000/jobs -H "Content-Type: application/json" \
   -d '{"title":"AI Engineer","location":"Sydney"}'
 # poll: curl http://127.0.0.1:8000/jobs/<job_id>
 curl http://127.0.0.1:8000/connection   # {"connected": true|false}
+
+# job↔resume skill match (needs a profile + GEMINI_API_KEY):
+curl -X POST http://127.0.0.1:8000/profile/match -H "Content-Type: application/json" \
+  -H "X-User-ID: <demo-user-uuid>" \
+  -d '{"jd_text":"Senior AI Engineer: Python, PyTorch, LLMs, FastAPI, AWS."}'
+# -> {"match_score": 90, "required_skills": [...], "matched_skills": [...]}
 ```
 
 ## Deploy (Railway)
