@@ -1,24 +1,21 @@
 """LLM skill-match between a candidate's master profile and a job description.
 
-Uses the same Groq/instructor structured client as the interview + CV flows.
+Uses Gemini with schema-enforced structured output. Gemini's free tier has a
+large token budget and context window, so the overview can score a full page of
+jobs — each with its complete job description — without exhausting a quota the
+way Groq's 100k tokens/day did.
+
 Traceability (see front-end/CLAUDE.md §2.3): matched_skills must be skills the
 candidate genuinely has — the prompt forbids inventing coverage and a post-filter
 drops any matched skill that isn't among the JD's required skills.
 """
 
-from typing import cast
-
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-from interview.llm import (
-    MAX_RETRIES,
-    MODEL_NAME,
-    MODEL_TEMPERATURE,
-    create_structured_client,
-)
 from profile.schemas import MasterProfile
 
-MAX_JD_CHARS = 6000
+MATCH_MODEL = "gemini-3.1-flash-lite"
 
 MATCH_PROMPT = """You compare a candidate's resume against a job description and score the fit.
 
@@ -28,10 +25,7 @@ CANDIDATE SKILLS (from their resume):
 CANDIDATE EXPERIENCE:
 {experience}
 
-JOB DESCRIPTION:
-{jd}
-
-Return, as structured data:
+The user message contains the full JOB DESCRIPTION. Return, as JSON matching the schema:
 - required_skills: the key skills / technologies the JOB asks for. Concise canonical
   names (e.g. "Python", "Kubernetes", "React"), deduplicated, at most 12.
 - matched_skills: the subset of required_skills that the candidate CLEARLY demonstrates
@@ -52,7 +46,12 @@ class JobMatch(BaseModel):
 
 
 def match_profile_to_jd(master: MasterProfile, jd_text: str) -> JobMatch:
-    """Score the candidate's fit for one job description via a single LLM call."""
+    """Score the candidate's fit for one job description via a single Gemini call."""
+    from google import genai
+    from google.genai import types
+
+    load_dotenv()
+
     skill_names = [s.name for s in master.skills]
     experience_tech = [t for e in master.experiences for t in e.tech]
     skills = ", ".join(dict.fromkeys(skill_names + experience_tech)) or "(none listed)"
@@ -60,26 +59,19 @@ def match_profile_to_jd(master: MasterProfile, jd_text: str) -> JobMatch:
         "; ".join(f"{e.role} at {e.org}" for e in master.experiences) or "(none listed)"
     )
 
-    client = create_structured_client()
-    result = cast(
-        JobMatch,
-        client.chat.completions.create(
-            model=MODEL_NAME,
-            response_model=JobMatch,
-            messages=[
-                {
-                    "role": "system",
-                    "content": MATCH_PROMPT.format(
-                        skills=skills,
-                        experience=experience,
-                        jd=jd_text[:MAX_JD_CHARS],
-                    ),
-                }
-            ],
-            temperature=MODEL_TEMPERATURE,
-            max_retries=MAX_RETRIES,
+    client = genai.Client()
+    response = client.models.generate_content(
+        model=MATCH_MODEL,
+        contents=f"JOB DESCRIPTION:\n{jd_text}",
+        config=types.GenerateContentConfig(
+            system_instruction=MATCH_PROMPT.format(skills=skills, experience=experience),
+            response_mime_type="application/json",
+            response_schema=JobMatch,
         ),
     )
+    if not response.text:
+        raise RuntimeError("Gemini returned no output for the match request")
+    result = JobMatch.model_validate_json(response.text)
 
     # Traceability guard: a matched skill must be one the JD actually requires.
     required_lower = {r.lower() for r in result.required_skills}

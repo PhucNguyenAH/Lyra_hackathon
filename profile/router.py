@@ -1,5 +1,6 @@
 """FastAPI boundary for profile uploads, edits, tailoring, and variant history."""
 
+import hashlib
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated
@@ -44,6 +45,10 @@ PDF_CONTENT_TYPE = "application/pdf"
 TEXT_CONTENT_TYPES = frozenset({"text/plain", "text/txt"})
 
 router = APIRouter(tags=["profile"])
+
+# Process-local cache of match results, keyed by (user_id, profile_version, JD
+# hash). Avoids re-running the LLM when the overview re-fetches on every load.
+_MATCH_CACHE: dict[tuple[str, int, str], JobMatch] = {}
 
 
 def get_current_user_id(
@@ -160,12 +165,26 @@ def match_job(
     request: MatchRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
 ) -> JobMatch:
-    """Score how well the candidate's resume matches one job description."""
+    """Score how well the candidate's resume matches one job description.
+
+    Cached per (user, profile version, JD) so the overview re-fetching on every
+    load doesn't re-run the LLM. A new CV upload bumps the version and busts it.
+    """
     try:
         profile = get_master_for_user(user_id)
     except ProfileNotFoundError as error:
         raise _profile_error(error) from error
-    return match_profile_to_jd(profile.master, request.jd_text)
+    cache_key = (
+        user_id,
+        profile.version,
+        hashlib.sha1(request.jd_text.encode("utf-8")).hexdigest(),
+    )
+    cached = _MATCH_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    result = match_profile_to_jd(profile.master, request.jd_text)
+    _MATCH_CACHE[cache_key] = result
+    return result
 
 
 @router.get(f"{API_PREFIX}/uploads")
