@@ -44,6 +44,7 @@ import {
   uploadCV,
 } from "@/lib/profile-api";
 import { DEMO_SEEDED_APPLICATION_ID, DEMO_SEEDED_JOB } from "@/lib/job-postings-seed";
+import { scrapeJobs, pollJob } from "@/lib/jobs-api";
 import { cn } from "@/lib/utils";
 
 const USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
@@ -198,6 +199,10 @@ export function ProfileWorkspace({
   const [variant, setVariant] = useState<CVVariant | null>(null);
   const [isTailoring, setIsTailoring] = useState(false);
   const [tailorError, setTailorError] = useState<string | null>(null);
+  const [scrapeTitle, setScrapeTitle] = useState("");
+  const [scrapeLocation, setScrapeLocation] = useState("");
+  const [showScrapeBar, setShowScrapeBar] = useState(false);
+  const [isScraping, setIsScraping] = useState(false);
 
   const loadProfile = useCallback(async () => {
     if (!USER_ID) {
@@ -247,11 +252,43 @@ export function ProfileWorkspace({
       setSelectedFile(null);
       setUploadLabel("");
       if (fileInputRef.current) fileInputRef.current.value = "";
+      const prefs = nextProfile.preferences;
+      setScrapeTitle(prefs.target_titles?.[0] ?? prefs.current_title ?? "");
+      setScrapeLocation(prefs.preferred_locations?.[0] ?? prefs.current_location ?? "");
+      setShowScrapeBar(true);
       toast.success("CV added to your master profile");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "CV upload failed");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleFindJobs = async () => {
+    if (!scrapeTitle.trim()) return;
+    setIsScraping(true);
+    try {
+      const jobId = await scrapeJobs(scrapeTitle.trim(), scrapeLocation.trim(), 10);
+      // poll until terminal (scraping ~10 jobs can take up to a minute)
+      for (let i = 0; i < 40; i++) {
+        const data = await pollJob(jobId);
+        if (data.status === "done") {
+          const n = data.results?.length ?? 0;
+          toast.success(`Found ${n} jobs — see the dashboard`);
+          setShowScrapeBar(false);
+          return;
+        }
+        if (data.status === "error") {
+          toast.error(data.error ?? "Scrape failed");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      toast.error("Scrape timed out");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Scrape failed");
+    } finally {
+      setIsScraping(false);
     }
   };
 
@@ -419,6 +456,42 @@ export function ProfileWorkspace({
               ))}
             </div>
           </div>
+
+          {showScrapeBar && (
+            <div className="flex flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 sm:flex-row sm:items-end lg:col-span-2">
+              <div className="flex-1 space-y-2">
+                <label className="text-xs font-semibold text-zinc-700">Job title</label>
+                <Input
+                  value={scrapeTitle}
+                  onChange={(event) => setScrapeTitle(event.target.value)}
+                  placeholder="Backend Engineer"
+                  className="h-10 bg-white"
+                />
+              </div>
+              <div className="flex-1 space-y-2">
+                <label className="text-xs font-semibold text-zinc-700">Location</label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-3 size-4 text-zinc-400" />
+                  <Input
+                    value={scrapeLocation}
+                    onChange={(event) => setScrapeLocation(event.target.value)}
+                    placeholder="Sydney, NSW"
+                    className="h-10 bg-white pl-9"
+                  />
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="lg"
+                disabled={!scrapeTitle.trim() || isScraping}
+                onClick={handleFindJobs}
+                className="bg-indigo-600 hover:bg-indigo-700"
+              >
+                {isScraping ? <LoaderCircle className="animate-spin" /> : <BriefcaseBusiness />}
+                {isScraping ? "Finding jobs" : "Find jobs"}
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
