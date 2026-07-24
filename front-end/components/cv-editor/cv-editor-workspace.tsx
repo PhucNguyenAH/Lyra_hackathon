@@ -76,36 +76,8 @@ export function CVEditorWorkspace({
     achievements: initialData.achievements ?? [],
     awards: initialData.awards ?? [],
     sectionOrder: initialData.sectionOrder ?? ["summary", "skills", "experience", "projects", "education", "achievements", "awards"],
-    projects: [
-      {
-        id: "proj-1",
-        name: "BankFlow",
-        meta: "Java, Spring Boot, Spring Security, PostgreSQL",
-        description: "Open-source LLM chat interface used by 1k+ developers.",
-        bullets: [
-          "Built a production-style banking REST API with JWT-based security, implementing idempotency keys to prevent duplicate transactions and optimistic locking to prevent race conditions on concurrent balance updates.",
-          "Wrote comprehensive unit tests with JUnit 5 and Mockito covering service logic, exception handling, and duplicate request detection.",
-          "Containerised with a multi-stage Docker build, deployed to AWS EC2 with RDS PostgreSQL, and automated via a GitHub Actions CI/CD pipeline.",
-        ],
-        suggestions: {
-          1: {
-            text: "Developed robust Spring Boot unit test validations using JUnit 5 and Mockito, securing 98% code coverage across core financial logic layers.",
-            scoreBoost: 8,
-            reason: "Adding exact coverage metrics (98%) and logic layers makes this project bullet significantly more technical."
-          }
-        }
-      }
-    ],
-    educationList: [
-      {
-        id: "edu-1",
-        school: "Macquarie University",
-        degree: "Bachelor of Information Technology (Cybersecurity & Software)",
-        location: "Sydney, NSW",
-        dateRange: "2023 - 2026",
-        details: ["Specialized coursework in advanced algorithms, database engines, and networking architecture."],
-      }
-    ]
+    projects: initialData.projects ?? [],
+    educationList: initialData.educationList ?? [],
   };
 
   const [cvData, setCvData] = useState<CVDataExtended>(initialExtended);

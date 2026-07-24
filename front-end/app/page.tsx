@@ -12,7 +12,8 @@ import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { tailorPreview } from "@/lib/profile-api";
+import { getProfile, tailorPreview } from "@/lib/profile-api";
+import { buildTailoredCV } from "@/lib/cv-tailoring";
 import { listJobs } from "@/lib/jobs-api";
 
 type TabId = "drafts" | "applications" | "cv-editor" | "interview";
@@ -73,16 +74,19 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
   const hasHydratedDraftsRef = useRef(false);
 
   useEffect(() => {
-    try {
-      const savedDrafts = window.localStorage.getItem(DRAFTS_STORAGE_KEY);
-      const savedDatabase = window.localStorage.getItem(CV_DATABASE_STORAGE_KEY);
-      if (savedDrafts) setDrafts(JSON.parse(savedDrafts) as CVDraft[]);
-      if (savedDatabase) setCvDatabase(JSON.parse(savedDatabase) as { [draftId: string]: CVData });
-    } catch {
-      // Corrupt or unavailable storage — keep the default starter draft.
-    } finally {
-      hasHydratedDraftsRef.current = true;
-    }
+    const load = window.setTimeout(() => {
+      try {
+        const savedDrafts = window.localStorage.getItem(DRAFTS_STORAGE_KEY);
+        const savedDatabase = window.localStorage.getItem(CV_DATABASE_STORAGE_KEY);
+        if (savedDrafts) setDrafts(JSON.parse(savedDrafts) as CVDraft[]);
+        if (savedDatabase) setCvDatabase(JSON.parse(savedDatabase) as { [draftId: string]: CVData });
+      } catch {
+        // Corrupt or unavailable storage, keep the default starter draft.
+      } finally {
+        hasHydratedDraftsRef.current = true;
+      }
+    }, 0);
+    return () => window.clearTimeout(load);
   }, []);
 
   useEffect(() => {
@@ -107,6 +111,7 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
         matchScore: Math.round(posting.score * 10),
         skillsRequired: posting.skills,
         skillsMatched: posting.skills.slice(0, matchedCount),
+        description: posting.description,
         url: posting.url,
       };
     }),
@@ -226,72 +231,50 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
   };
 
   // Handle Tailor CV CTA from Jobs Dashboard
-  const handleTailorCV = async (jobId: string, source: { draftId?: string; file?: File }) => {
+  const handleTailorCV = async (jobId: string) => {
     const job = jobs.find((j) => j.id === jobId);
     if (job) {
-      const sourceData = source.draftId ? (cvDatabase[source.draftId] || initialKianCVData) : initialKianCVData;
-      if (source.file) {
-        const sourceDraftId = `source-${job.id}-${Date.now()}`;
-        const sourcePdfUrl = URL.createObjectURL(source.file);
-        setDrafts((prev) => [{
-          id: sourceDraftId,
-          title: `${source.file!.name.replace(/\.pdf$/i, "")} · ${job.company}`,
-          role: job.title,
-          level: "Enhancement workspace",
-          source: `Uploaded PDF · ${source.file!.name}`,
-          updated: new Date().toLocaleDateString(),
-          exported: "Never",
-          matchScore: job.matchScore,
-          targetCompany: job.company,
-          matchedSkills: job.skillsMatched,
-          missingSkills: job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill)),
-          matchSuggestions: [
-            { id: `${job.id}-summary`, title: "Align the profile with this role", detail: `Prioritize ${job.skillsMatched.slice(0, 3).join(", ")} near the top of the suggested CV.`, scoreBoost: 4, action: "summary" },
-            { id: `${job.id}-impact`, title: "Strengthen measurable impact", detail: "Keep the original facts, but move quantified outcomes to the start of each bullet.", scoreBoost: 5, action: "experience" },
-            { id: `${job.id}-skills`, title: "Review missing requirements", detail: `Do not add ${job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill)).join(", ") || "new skills"} unless the source PDF supports them.`, scoreBoost: 0, action: "skills" },
-          ],
-          sourcePdfUrl,
-          isEnhancementSource: true,
-        }, ...prev]);
-        setCvDatabase((prev) => ({ ...prev, [sourceDraftId]: { ...sourceData, headline: job.title, sectionOrder: ["education", "experience", "projects", "skills", "summary", "achievements", "awards"] } }));
-        setSelectedDraftId(sourceDraftId);
-        setActiveTab("cv-editor");
-        return;
-      }
+      const sourceData = initialKianCVData;
       setTailoringState({ job, phase: "analyzing" });
-      let variant: Awaited<ReturnType<typeof tailorPreview>> | null = null;
+      let variant: Awaited<ReturnType<typeof tailorPreview>>;
+      let profile: Awaited<ReturnType<typeof getProfile>>;
       try {
-        const jdText = `${job.title} at ${job.company} (${job.location}). Required skills: ${job.skillsRequired.join(", ")}.`;
-        variant = await tailorPreview(getBuilderUserId(), jdText);
+        const userId = getBuilderUserId();
+        const jdText = [
+          `${job.title} at ${job.company} (${job.location}).`,
+          job.description,
+          `Required skills: ${job.skillsRequired.join(", ")}.`,
+        ].filter(Boolean).join(" ");
+        [profile, variant] = await Promise.all([
+          getProfile(userId),
+          tailorPreview(userId, jdText),
+        ]);
       } catch (error) {
         toast.error(
           error instanceof Error
             ? error.message
-            : "Could not reach the tailoring backend — showing generic suggestions instead.",
+            : "Could not tailor from your master profile.",
         );
+        setTailoringState(null);
+        return;
       }
       setTailoringState({ job, phase: "rewriting" });
       await new Promise((resolve) => window.setTimeout(resolve, 400));
       const jobDraftId = `draft-${job.id}-${Date.now()}`;
-      const matchSuggestions = variant
-        ? [
-            { id: `${jobDraftId}-rationale`, title: "Why this selection", detail: variant.rationale, scoreBoost: 0, action: "summary" as const },
-            ...(variant.omitted_notable.length > 0
-              ? [{ id: `${jobDraftId}-omitted`, title: "Left out of this version", detail: `Omitted as less relevant: ${variant.omitted_notable.join(", ")}. Add it back manually if you disagree.`, scoreBoost: 0, action: "experience" as const }]
-              : []),
-            { id: `${jobDraftId}-skills`, title: "Skills this job cares about", detail: `Emphasize: ${variant.emphasized_skills.join(", ")}.`, scoreBoost: 3, action: "skills" as const },
-          ]
-        : [
-            { id: `${job.id}-summary`, title: "Align the opening summary", detail: `Lead with ${job.skillsMatched.slice(0, 3).join(", ")} to make the role fit obvious.`, scoreBoost: 4, action: "summary" as const },
-            { id: `${job.id}-impact`, title: "Strengthen experience evidence", detail: "Add one measurable outcome to the most relevant experience bullet.", scoreBoost: 5, action: "experience" as const },
-            { id: `${job.id}-skills`, title: "Review skill gaps honestly", detail: `Check ${job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill)).join(", ") || "the remaining job requirements"}; only add skills you can support.`, scoreBoost: 0, action: "skills" as const },
-          ];
+      const matchSuggestions = [
+        { id: `${jobDraftId}-rationale`, title: "Why Athena selected this content", detail: variant.rationale, scoreBoost: 0, action: "summary" as const },
+        ...(variant.omitted_notable.length > 0
+          ? [{ id: `${jobDraftId}-omitted`, title: "Master-profile content left out", detail: `Less relevant for this job: ${variant.omitted_notable.join(", ")}. You can add it back if needed.`, scoreBoost: 0, action: "experience" as const }]
+          : []),
+        { id: `${jobDraftId}-skills`, title: "Skills selected for this job", detail: variant.emphasized_skills.length > 0 ? `Selected from your evidence: ${variant.emphasized_skills.join(", ")}.` : "No evidenced master-profile skills matched this job strongly enough.", scoreBoost: 3, action: "skills" as const },
+      ];
+      const tailoredData = buildTailoredCV(profile, variant, job.title, sourceData);
       setDrafts((prev) => [{
           id: jobDraftId,
           title: `${sourceData.fullName} · ${job.company}`,
           role: job.title,
           level: job.title.toLowerCase().includes("senior") ? "Senior (5+ years)" : "Targeted application",
-          source: variant ? "AI-tailored from master profile" : "Tailored from workspace CV",
+          source: "AI-selected from master profile",
           updated: new Date().toLocaleDateString(),
           exported: "Never",
           matchScore: job.matchScore,
@@ -302,13 +285,7 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
         }, ...prev]);
       setCvDatabase((prev) => ({
           ...prev,
-          [jobDraftId]: {
-            ...sourceData,
-            headline: job.title,
-            sectionOrder: ["education", "experience", "projects", "skills", "summary", "achievements", "awards"],
-            skills: sourceData.skills.map((category) => ({ ...category, items: [...category.items] })),
-            experience: sourceData.experience.map((item) => ({ ...item, bullets: [...item.bullets] })),
-          },
+          [jobDraftId]: tailoredData,
         }));
       setTailoringState({ job, phase: "ready" });
       await new Promise((resolve) => window.setTimeout(resolve, 450));
@@ -340,7 +317,6 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       {activeTab === "drafts" && (
         <DraftsDashboard
           jobs={jobs}
-          drafts={drafts}
           onTailorCV={handleTailorCV}
         />
       )}
