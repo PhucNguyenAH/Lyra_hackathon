@@ -215,6 +215,20 @@ export type CVVariantRecord = {
   created_at: string;
 };
 
+export type InterviewCVSuggestion = {
+  item_id: string;
+  source_bullet: string;
+  issue: string;
+  suggestion: string;
+  interview_evidence: string;
+  occurrences: number;
+  latest_session_id: string;
+};
+
+export function getInterviewCVSuggestions(userId: string): Promise<InterviewCVSuggestion[]> {
+  return profileRequest<InterviewCVSuggestion[]>("/profile/interview-cv-suggestions", userId);
+}
+
 export function tailorApplication(
   userId: string,
   applicationId: string,

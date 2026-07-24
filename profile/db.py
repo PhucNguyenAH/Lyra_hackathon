@@ -6,7 +6,13 @@ from datetime import datetime, timezone
 
 from supabase import Client, create_client
 
-from profile.schemas import CandidatePreferences, CVVariant, MasterProfile, ProfileRecord
+from profile.schemas import (
+    CandidatePreferences,
+    CVVariant,
+    InterviewCVSuggestion,
+    MasterProfile,
+    ProfileRecord,
+)
 
 
 PROFILES_TABLE = "profiles"
@@ -279,3 +285,72 @@ def list_cv_variants(application_id: str) -> list[dict[str, object]]:
             }
         )
     return variants
+
+
+def list_interview_cv_suggestions(user_id: str) -> list[InterviewCVSuggestion]:
+    """Aggregate still-valid, exact-bullet coaching findings across sessions."""
+    profile = get_master_for_user(user_id)
+    valid_bullets = {
+        (item.id, bullet)
+        for item in [*profile.master.experiences, *profile.master.projects]
+        for bullet in item.bullets
+    }
+    sessions_response = (
+        _get_client()
+        .table("interview_sessions")
+        .select("id")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .limit(50)
+        .execute()
+    )
+    session_rows = sessions_response.data if isinstance(sessions_response.data, list) else []
+    session_ids = [
+        str(row["id"])
+        for row in session_rows
+        if isinstance(row, Mapping) and row.get("id")
+    ]
+    if not session_ids:
+        return []
+    reports_response = (
+        _get_client()
+        .table("interview_reports")
+        .select("session_id,report,created_at")
+        .in_("session_id", session_ids)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    report_rows = reports_response.data if isinstance(reports_response.data, list) else []
+    aggregated: dict[tuple[str, str, str], InterviewCVSuggestion] = {}
+    for raw_row in report_rows:
+        if not isinstance(raw_row, Mapping) or not isinstance(raw_row.get("report"), Mapping):
+            continue
+        report = raw_row["report"]
+        suggestions = report.get("cv_suggestions")
+        if not isinstance(suggestions, list):
+            continue
+        for raw_suggestion in suggestions:
+            if not isinstance(raw_suggestion, Mapping):
+                continue
+            item_id = str(raw_suggestion.get("item_id") or "")
+            source_bullet = str(raw_suggestion.get("source_bullet") or "")
+            issue = str(raw_suggestion.get("issue") or "")
+            if (item_id, source_bullet) not in valid_bullets or not issue:
+                continue
+            key = (item_id, source_bullet, issue)
+            if key in aggregated:
+                aggregated[key].occurrences += 1
+                continue
+            aggregated[key] = InterviewCVSuggestion(
+                item_id=item_id,
+                source_bullet=source_bullet,
+                issue=issue,
+                suggestion=str(raw_suggestion.get("suggestion") or ""),
+                interview_evidence=str(raw_suggestion.get("interview_evidence") or ""),
+                occurrences=1,
+                latest_session_id=str(raw_row["session_id"]),
+            )
+    return sorted(
+        aggregated.values(),
+        key=lambda suggestion: (-suggestion.occurrences, suggestion.item_id),
+    )

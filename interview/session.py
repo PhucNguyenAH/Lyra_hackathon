@@ -28,6 +28,7 @@ from interview.schemas import (
     WeakTopic,
 )
 from interview.turn import analyze
+from profile.schemas import MasterProfile
 
 
 SESSIONS_TABLE = "interview_sessions"
@@ -403,11 +404,22 @@ def evaluate_and_save(db: Client, session_id: str, llm_client: StructuredClient 
     """Background task: evaluate once, persist report, then expose completed status."""
     session = load_session(db, session_id)
     try:
+        profile_response = (
+            db.table("profiles")
+            .select("master")
+            .eq("user_id", session.config.user_id)
+            .limit(1)
+            .execute()
+        )
+        profile_row = _single_row(profile_response.data)
+        master_data = profile_row.get("master") if profile_row else None
+        master_profile = MasterProfile.model_validate(master_data) if master_data else None
         report = evaluate_session(
             session.config.topics,
             session.state,
             llm_client,
             interview_stage=session.config.interview_stage,
+            master_profile=master_profile,
         )
         db.table(REPORTS_TABLE).upsert(
             {"session_id": session_id, "report": report.model_dump(mode="json")},

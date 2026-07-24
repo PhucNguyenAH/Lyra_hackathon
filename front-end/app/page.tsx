@@ -12,7 +12,7 @@ import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { getProfile, tailorPreview } from "@/lib/profile-api";
+import { getInterviewCVSuggestions, getProfile, tailorPreview } from "@/lib/profile-api";
 import { buildTailoredCV } from "@/lib/cv-tailoring";
 import { listJobs } from "@/lib/jobs-api";
 
@@ -238,6 +238,7 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       setTailoringState({ job, phase: "analyzing" });
       let variant: Awaited<ReturnType<typeof tailorPreview>>;
       let profile: Awaited<ReturnType<typeof getProfile>>;
+      let interviewSuggestions: Awaited<ReturnType<typeof getInterviewCVSuggestions>>;
       try {
         const userId = getBuilderUserId();
         const jdText = [
@@ -245,9 +246,10 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
           job.description,
           `Required skills: ${job.skillsRequired.join(", ")}.`,
         ].filter(Boolean).join(" ");
-        [profile, variant] = await Promise.all([
+        [profile, variant, interviewSuggestions] = await Promise.all([
           getProfile(userId),
           tailorPreview(userId, jdText),
+          getInterviewCVSuggestions(userId),
         ]);
       } catch (error) {
         toast.error(
@@ -262,6 +264,15 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       await new Promise((resolve) => window.setTimeout(resolve, 400));
       const jobDraftId = `draft-${job.id}-${Date.now()}`;
       const matchSuggestions = [
+        ...interviewSuggestions.map((suggestion) => ({
+          id: `${jobDraftId}-interview-${suggestion.latest_session_id}-${suggestion.item_id}-${suggestion.issue}`,
+          title: suggestion.occurrences > 1
+            ? `Recurring interview gap · ${suggestion.occurrences} sessions`
+            : "Interview feedback for this CV",
+          detail: `Source bullet: “${suggestion.source_bullet}”\n\nObserved: ${suggestion.interview_evidence}\n\nNext edit: ${suggestion.suggestion}`,
+          scoreBoost: 0,
+          action: "experience" as const,
+        })),
         { id: `${jobDraftId}-rationale`, title: "Why Athena selected this content", detail: variant.rationale, scoreBoost: 0, action: "summary" as const },
         ...(variant.omitted_notable.length > 0
           ? [{ id: `${jobDraftId}-omitted`, title: "Master-profile content left out", detail: `Less relevant for this job: ${variant.omitted_notable.join(", ")}. You can add it back if needed.`, scoreBoost: 0, action: "experience" as const }]

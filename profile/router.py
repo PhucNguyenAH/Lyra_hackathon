@@ -18,11 +18,12 @@ from profile.db import (
     get_profile,
     list_cv_uploads,
     list_cv_variants,
+    list_interview_cv_suggestions,
     save_master,
     save_preferences,
 )
 from profile.ingest import ingest_cv
-from profile.schemas import CandidatePreferences, CVVariant, MasterProfile, ProfileRecord
+from profile.schemas import CandidatePreferences, CVVariant, InterviewCVSuggestion, MasterProfile, ProfileRecord
 from profile.tailor import TailorValidationError, generate_tailored_variant, tailor_cv
 
 
@@ -155,6 +156,17 @@ def read_cv_uploads(
     try:
         profile = get_master_for_user(user_id)
         return list_cv_uploads(profile.id)
+    except ProfileNotFoundError as error:
+        raise _profile_error(error) from error
+
+
+@router.get(f"{API_PREFIX}/interview-cv-suggestions", response_model=list[InterviewCVSuggestion])
+def read_interview_cv_suggestions(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> list[InterviewCVSuggestion]:
+    """Return coaching gaps that still trace to the user's current master CV."""
+    try:
+        return list_interview_cv_suggestions(user_id)
     except ProfileNotFoundError as error:
         raise _profile_error(error) from error
 

@@ -1185,13 +1185,39 @@ export function InterviewWorkspace({ drafts, cvDatabase, jobs, initialSessionId,
 
               <Card className="border-zinc-200 bg-white shadow-none dark:border-zinc-800 dark:bg-zinc-900">
                 <CardHeader className="pb-3"><CardTitle className="text-sm font-bold">{reportSummary ? "AI evaluation" : "STAR breakdown"}</CardTitle></CardHeader>
-                <CardContent className="grid grid-cols-2 gap-x-5 gap-y-4 text-xs sm:grid-cols-4">
-                  {(reportSummary
-                    ? [["Specificity", reportScore(reportSummary.scores.specificity)], ["Technical depth", reportScore(reportSummary.scores.technical_depth)], ["Communication", reportScore(reportSummary.scores.communication)], ["Under pressure", reportScore(reportSummary.scores.handling_pressure)]]
-                    : [["Situation", activeScore.situation], ["Task", activeScore.task], ["Action", activeScore.action], ["Result", activeScore.result]]
-                  ).map(([label, value]) => <div key={String(label)}><div className="mb-1.5 flex justify-between font-semibold"><span>{label}</span><span>{value}%</span></div><Progress value={Number(value)} className="h-1.5 bg-zinc-100 [&>div]:bg-zinc-800 dark:bg-zinc-800 dark:[&>div]:bg-zinc-200" /></div>)}
+                <CardContent className="text-xs">
+                  <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
+                    {(reportSummary
+                      ? [["Specificity", reportScore(reportSummary.scores.specificity)], ["Technical depth", reportScore(reportSummary.scores.technical_depth)], ["Communication", reportScore(reportSummary.scores.communication)], ["Under pressure", reportScore(reportSummary.scores.handling_pressure)]]
+                      : [["Situation", activeScore.situation], ["Task", activeScore.task], ["Action", activeScore.action], ["Result", activeScore.result]]
+                    ).map(([label, value]) => <div key={String(label)}><div className="mb-1.5 flex justify-between font-semibold"><span>{label}</span><span>{value}%</span></div><Progress value={Number(value)} className="h-1.5 bg-zinc-100 [&>div]:bg-zinc-800 dark:bg-zinc-800 dark:[&>div]:bg-zinc-200" /></div>)}
+                  </div>
+                  {(reportSummary?.score_evidence?.length ?? 0) > 0 && (
+                    <div className="mt-4 grid gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800 sm:grid-cols-2">
+                      {reportSummary?.score_evidence?.map((item) => (
+                        <p key={item.dimension} className="rounded-lg bg-zinc-50 p-2.5 leading-relaxed text-zinc-600 dark:bg-zinc-950 dark:text-zinc-300">
+                          <span className="font-semibold capitalize">{item.dimension.replace("_", " ")}:</span> {item.evidence}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
+
+              {reportSummary && reportSummary.cv_suggestions.length > 0 && (
+                <section className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 dark:border-violet-900/60 dark:bg-violet-950/20">
+                  <h3 className="flex items-center gap-2 text-sm font-bold text-violet-900 dark:text-violet-200"><Sparkles className="h-4 w-4" />Feedback connected to your CV</h3>
+                  <p className="mt-1 text-xs text-violet-900/70 dark:text-violet-200/70">These exact-bullet suggestions will appear the next time you tailor your CV.</p>
+                  <div className="mt-3 space-y-2">
+                    {reportSummary.cv_suggestions.map((suggestion) => (
+                      <div key={`${suggestion.item_id}-${suggestion.issue}`} className="rounded-lg border border-violet-200/70 bg-white/70 p-3 text-xs dark:border-violet-900 dark:bg-zinc-950/50">
+                        <p className="font-medium text-zinc-800 dark:text-zinc-200">“{suggestion.source_bullet}”</p>
+                        <p className="mt-1 text-zinc-600 dark:text-zinc-400">{suggestion.suggestion}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               <div className="grid gap-4 md:grid-cols-2">
                 <section className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/20"><h3 className="flex items-center gap-2 text-sm font-bold text-emerald-800 dark:text-emerald-300"><CheckCircle2 className="h-4 w-4" />What worked</h3><p className="mt-2 text-xs leading-relaxed text-emerald-900/75 dark:text-emerald-200/70">Your answer was relevant ({activeScore.relevance}%) and technically specific ({activeScore.specificity}%). {activeScore.metricsPresent ? "You supported it with measurable evidence." : "Your explanation stayed focused on the question."}</p></section>
