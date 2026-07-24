@@ -56,7 +56,11 @@ class LoginSessionManager:
             self.state = "error"
             self.error = str(exc)
             raise
-        return {"session_id": self.session_id, "state": self.state}
+        return {
+            "session_id": self.session_id,
+            "state": self.state,
+            "stream_available": self._vnc is not None,
+        }
 
     async def _run(self) -> None:
         try:

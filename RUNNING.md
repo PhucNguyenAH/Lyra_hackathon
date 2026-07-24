@@ -67,7 +67,9 @@ port to wire.
 
 ## 4. LinkedIn login stream needs a display
 
-`/connect-linkedin` streams a real browser via VNC, which needs `Xvfb` + `x11vnc`.
+`/connect-linkedin` opens a native Chromium window on macOS, Windows, and Linux
+desktops. In Docker or headless Linux it streams the browser via VNC, which needs
+`Xvfb` + `x11vnc`.
 
 - **Easiest — Docker** (bundles them):
   ```bash
@@ -84,6 +86,10 @@ port to wire.
   set -a; source .env; set +a
   DISPLAY=:99 ADMIN_TOKEN=dev-secret uvicorn server:app --host 127.0.0.1 --port 8000
   ```
+
+On macOS or Windows, start the backend normally and click **Start login**; a
+separate local Chromium window opens. On Linux without a desktop display, use
+the Docker option above or start Xvfb and export `DISPLAY`.
 
 Once you've logged in once, the session is stored **encrypted in Supabase** and
 reloads automatically on every restart — no re-login needed (even with no local
