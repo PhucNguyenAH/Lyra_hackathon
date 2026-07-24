@@ -108,7 +108,7 @@ def configure_email_services(app: FastAPI) -> None:
         # browser isn't blocked when opened at 127.0.0.1:3000 vs localhost:3000.
         allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "X-User-ID"],
     )
     app.include_router(router)
