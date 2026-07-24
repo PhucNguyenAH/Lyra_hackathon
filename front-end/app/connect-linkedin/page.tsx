@@ -1,5 +1,5 @@
-// import { ConnectLinkedInPanel } from "@/components/connect-linkedin-panel";
+import { ConnectLinkedInPanel } from "@/components/connect-linkedin-panel";
 
-// export default function ConnectLinkedInPage() {
-//   return <ConnectLinkedInPanel />;
-// }
+export default function ConnectLinkedInPage() {
+  return <ConnectLinkedInPanel />;
+}
