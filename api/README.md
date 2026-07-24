@@ -24,15 +24,15 @@ Start a scrape:
 ```bash
 curl -X POST http://localhost:8000/jobs \
   -H "Content-Type: application/json" \
-  -d '{"title": "AI Engineer", "location": "Sydney"}'
+  -d '{"title": "AI Engineer", "location": "Sydney", "count": 10}'
 # -> 202 {"job_id": "<uuid>", "status": "pending"}
 ```
 
-Poll for the result:
+Poll for the results (a list of scraped jobs):
 
 ```bash
 curl http://localhost:8000/jobs/<uuid>
-# -> {"status": "done", "result": {"job_url": ..., "title": ..., ...}, "error": null}
+# -> {"status": "done", "results": [{"job_url": ..., "title": ..., ...}], "error": null}
 ```
 
 `status` is one of `pending | running | done | error`.
