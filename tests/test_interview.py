@@ -1,6 +1,7 @@
 """Fast unit coverage for interview prompts and code-enforced movement."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from interview.evaluator import evaluate_session
 from interview.question_gen import build_question_prompt, generate_topics
@@ -9,6 +10,10 @@ from interview.schemas import (
     ChatMessage,
     DeliveryEvidence,
     FeedbackReport,
+    HiringProcessResearch,
+    HiringStage,
+    HiringStageCategory,
+    HiringStageEvidence,
     InterviewStage,
     InterviewState,
     NextMove,
@@ -139,6 +144,47 @@ def test_question_prompt_prioritizes_previous_weakness_and_cv() -> None:
     assert "topics 1-2 MUST target them" in prompt
     assert "TARGET SENIORITY: Intern / junior" in prompt
     assert "Do not challenge" in prompt
+
+
+def test_question_prompt_uses_research_for_the_selected_round_only() -> None:
+    research = HiringProcessResearch(
+        company="Stripe",
+        job_title="Backend Engineer",
+        summary="Reported multi-stage process",
+        stages=[
+            HiringStage(
+                name="Technical screen",
+                category=HiringStageCategory.EXPERIENCE_TECHNICAL,
+                description="Focuses on API design trade-offs and debugging production systems.",
+                evidence=[HiringStageEvidence(title="Stripe interview guide", url="https://example.com/stripe")],
+                confidence=0.91,
+                practice_supported=True,
+            ),
+            HiringStage(
+                name="Recruiter call",
+                category=HiringStageCategory.PHONE_SCREEN,
+                description="Covers motivation and availability.",
+                confidence=0.8,
+                practice_supported=True,
+            ),
+        ],
+        researched_at=datetime.now(UTC),
+        confidence=0.9,
+    )
+
+    prompt = build_question_prompt(
+        "Built a payments API with retries and idempotency.",
+        "Backend Engineer at Stripe",
+        [],
+        "Junior",
+        InterviewStage.EXPERIENCE_TECHNICAL,
+        research,
+    )
+
+    assert "API design trade-offs and debugging production systems" in prompt
+    assert "Stripe interview guide" in prompt
+    assert "motivation and availability" not in prompt
+    assert "shape at least 2 topics" in prompt
 
 
 def test_question_prompt_keeps_platform_rounds_conversational() -> None:

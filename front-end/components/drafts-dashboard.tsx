@@ -112,6 +112,15 @@ type ApplicationResponse = {
   last_activity_at: string;
 };
 
+type InterviewPrepDraft = {
+  id: string;
+  job_id: string;
+  company: string;
+  job_title: string;
+  suggested_stage: string;
+  created_at: string;
+};
+
 interface DraftsDashboardProps {
   jobs: JobMatching[];
   onTailorCV: (jobId: string) => void;
@@ -149,6 +158,7 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
   const [jobSearch, setJobSearch] = useState("");
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [emailDecisions, setEmailDecisions] = useState<EmailDecision[]>([]);
+  const [interviewPrep, setInterviewPrep] = useState<InterviewPrepDraft[]>([]);
   const [emailLoading, setEmailLoading] = useState(true);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailActionId, setEmailActionId] = useState<string | null>(null);
@@ -312,10 +322,15 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
     let active = true;
     const loadNotifications = async () => {
       try {
-        const response = await fetch(`${EMAIL_API_URL}/email-services/notifications`, { cache: "no-store" });
-        if (!response.ok) throw new Error("Email notifications are temporarily unavailable");
-        const notifications = await response.json() as EmailNotificationResponse[];
+        const [notificationResponse, prepResponse] = await Promise.all([
+          fetch(`${EMAIL_API_URL}/email-services/notifications`, { cache: "no-store" }),
+          fetch(`${EMAIL_API_URL}/email-services/interview-prep`, { cache: "no-store" }),
+        ]);
+        if (!notificationResponse.ok || !prepResponse.ok) throw new Error("Email notifications are temporarily unavailable");
+        const notifications = await notificationResponse.json() as EmailNotificationResponse[];
+        const prepDrafts = await prepResponse.json() as InterviewPrepDraft[];
         if (!active) return;
+        setInterviewPrep(prepDrafts);
         setEmailDecisions(notifications.map((notification) => ({
           id: notification.id,
           company: notification.company,
@@ -463,6 +478,20 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
         <Card className="h-fit gap-0 overflow-hidden py-0 shadow-sm">
           <CardHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"><CardTitle className="flex items-center justify-between text-base"><span className="flex items-center gap-2"><Mail className="h-4 w-4 text-indigo-600" />Email decisions</span><Badge variant="secondary">{pendingCount} pending</Badge></CardTitle><p className="mt-1 text-xs text-zinc-500">Uncertain inbox updates wait here for your decision.</p></CardHeader>
           <CardContent className="space-y-3 p-3">
+            {interviewPrep.map((prep) => (
+              <article key={prep.id} className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-950/20">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white"><BriefcaseBusiness className="h-4 w-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">Interview detected — practice is ready</p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-600 dark:text-zinc-300">{prep.job_title} at {prep.company}</p>
+                    <Button size="sm" className="mt-3 h-8 text-xs" onClick={() => { window.location.href = `/interviews?jobId=${encodeURIComponent(prep.job_id)}&stage=${encodeURIComponent(prep.suggested_stage)}`; }}>
+                      Start tailored practice
+                    </Button>
+                  </div>
+                </div>
+              </article>
+            ))}
             {emailLoading && <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500"><LoaderCircle className="h-4 w-4 animate-spin" />Checking your inbox decisions…</div>}
             {!emailLoading && emailError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-400">{emailError}</div>}
             {!emailLoading && !emailError && emailDecisions.length === 0 && <div className="py-8 text-center"><Check className="mx-auto h-5 w-5 text-emerald-600" /><p className="mt-2 text-sm font-semibold">No decisions waiting</p><p className="mt-1 text-xs text-zinc-500">New uncertain application emails will appear here.</p></div>}

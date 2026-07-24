@@ -250,7 +250,19 @@ export function InterviewWorkspace({ drafts, cvDatabase, jobs, initialSessionId,
         if (!response.ok) throw new Error("Could not load application statuses");
         const applications = await response.json() as Array<{ job_id: string; status: string }>;
         const eligibleJobIds = new Set(applications.filter((application) => ["applied", "interview"].includes(application.status)).map((application) => application.job_id));
-        if (active) setAppliedJobs(jobs.filter((job) => eligibleJobIds.has(job.id)));
+        if (active) {
+          const eligibleJobs = jobs.filter((job) => eligibleJobIds.has(job.id));
+          setAppliedJobs(eligibleJobs);
+          const query = new URLSearchParams(window.location.search);
+          const requestedJobId = query.get("jobId");
+          const requestedStage = query.get("stage");
+          if (requestedJobId && eligibleJobs.some((job) => job.id === requestedJobId)) {
+            setSelectedJobId(requestedJobId);
+          }
+          if (requestedStage === "phone_screen" || requestedStage === "experience_technical") {
+            setSelectedStage(requestedStage);
+          }
+        }
       } catch {
         if (active) setAppliedJobs([]);
       } finally {

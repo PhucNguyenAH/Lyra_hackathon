@@ -152,12 +152,13 @@ def create_session(
     candidate_cv = cv_text.strip() if cv_text else _load_cv_text(db, user_id)
     weak_topics = _load_recent_weak_topics(db, user_id, interview_stage, company, job_title)
     topics = generate_topics(
-        candidate_cv,
-        job_description,
-        weak_topics,
-        role_level,
-        interview_stage,
-        llm_client,
+        cv_text=candidate_cv,
+        job_description=job_description,
+        weak_topics=weak_topics,
+        role_level=role_level,
+        interview_stage=interview_stage,
+        client=llm_client,
+        hiring_process=hiring_process,
     )
     config = SessionConfig(
         user_id=user_id,
