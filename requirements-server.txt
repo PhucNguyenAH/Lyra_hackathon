@@ -12,3 +12,4 @@ instructor>=1.7.0       # structured LLM output
 markitdown[pdf]>=0.1.6  # PDF/text CV -> markdown for extraction
 rapidfuzz>=3.10.0       # fuzzy matching in the interview/email flow
 python-multipart>=0.0.12  # FastAPI multipart parsing for CV uploads
+google-genai>=1.0.0     # Gemini client for the job skill-match endpoint

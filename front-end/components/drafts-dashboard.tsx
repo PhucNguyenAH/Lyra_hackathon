@@ -171,11 +171,15 @@ export function DraftsDashboard({ jobs, jobsLoading, jobsError, onRefreshJobs, o
   const [applicationFilter, setApplicationFilter] = useState<ApplicationStatus | "ALL">("ALL");
   const filteredJobs = useMemo(() => {
     const query = jobSearch.trim().toLowerCase();
-    return jobs.filter((job) => {
-      const matchesQuery = !query || [job.title, job.company, job.location, ...job.skillsRequired].join(" ").toLowerCase().includes(query);
-      const status = applications[job.id]?.status ?? "NOT APPLIED";
-      return matchesQuery && (applicationFilter === "ALL" || status === applicationFilter);
-    });
+    return jobs
+      .filter((job) => {
+        const matchesQuery = !query || [job.title, job.company, job.location, ...job.skillsRequired].join(" ").toLowerCase().includes(query);
+        const status = applications[job.id]?.status ?? "NOT APPLIED";
+        return matchesQuery && (applicationFilter === "ALL" || status === applicationFilter);
+      })
+      // Highest match first; jobs still being scored (matchScore 0) fall to the
+      // bottom and rise as their LLM match resolves.
+      .sort((a, b) => b.matchScore - a.matchScore);
   }, [applicationFilter, applications, jobSearch, jobs]);
 
   const pendingCount = emailDecisions.filter((decision) => decision.state === "pending").length;

@@ -11,7 +11,7 @@ import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { getInterviewCVSuggestions, getProfile, tailorPreview } from "@/lib/profile-api";
+import { getInterviewCVSuggestions, getProfile, tailorPreview, matchJob } from "@/lib/profile-api";
 import { buildTailoredCV } from "@/lib/cv-tailoring";
 import { listJobs } from "@/lib/jobs-api";
 
@@ -21,6 +21,25 @@ const CONFIGURED_USER_ID = process.env.NEXT_PUBLIC_DEMO_USER_ID ?? "";
 const BROWSER_USER_ID_KEY = "lyra-interview-user-id";
 const DRAFTS_STORAGE_KEY = "lyra-cv-drafts";
 const CV_DATABASE_STORAGE_KEY = "lyra-cv-database";
+
+// Run async work over items with a bounded number in flight — keeps the
+// per-job LLM match calls from hammering the backend / hitting rate limits.
+async function mapWithConcurrency<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      await fn(items[index]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+}
 
 function getBuilderUserId(): string {
   if (CONFIGURED_USER_ID) return CONFIGURED_USER_ID;
@@ -104,25 +123,68 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
   const [jobsRefreshVersion, setJobsRefreshVersion] = useState(0);
 
   // Supabase, populated by the scraper, is the only job source. Poll so jobs
-  // appear automatically when a scrape started from /profile completes.
+  // appear automatically when a scrape started from /profile completes, and
+  // score each newly-seen job's fit against the resume with the LLM match
+  // endpoint (a few at a time). Scores are kept across polls and each job is
+  // only matched once, so re-polling doesn't re-trigger the LLM or wipe scores.
   useEffect(() => {
     let active = true;
+    const scoredIds = new Set<string>();
+    const canMatch = Boolean(CONFIGURED_USER_ID);
     const loadJobs = async () => {
       try {
         const rows = await listJobs();
         if (!active) return;
-        setJobs(rows.map((row) => ({
-          id: row.id,
-          title: row.role,
-          company: row.company,
-          location: row.location ?? "",
-          matchScore: 0,
-          skillsRequired: [],
-          skillsMatched: [],
-          description: row.description ?? undefined,
-          url: row.url ?? undefined,
-        })));
+        setJobs((prev) => {
+          const prevById = new Map(prev.map((job) => [job.id, job]));
+          return rows.map((row) => {
+            const existing = prevById.get(row.id);
+            if (existing) return existing;
+            return {
+              id: row.id,
+              title: row.role,
+              company: row.company,
+              location: row.location ?? "",
+              matchScore: 0,
+              skillsRequired: [],
+              skillsMatched: [],
+              description: row.description ?? undefined,
+              url: row.url ?? undefined,
+              matchPending: canMatch && Boolean(row.description),
+            };
+          });
+        });
         setJobsError(null);
+
+        if (canMatch) {
+          const toMatch = rows.filter((row) => row.description && !scoredIds.has(row.id));
+          for (const row of toMatch) scoredIds.add(row.id);
+          void mapWithConcurrency(toMatch, 4, async (row) => {
+            try {
+              const result = await matchJob(CONFIGURED_USER_ID, row.description as string);
+              if (!active) return;
+              setJobs((prev) =>
+                prev.map((j) =>
+                  j.id === row.id
+                    ? {
+                        ...j,
+                        matchScore: result.match_score,
+                        skillsRequired: result.required_skills,
+                        skillsMatched: result.matched_skills,
+                        matchPending: false,
+                      }
+                    : j,
+                ),
+              );
+            } catch {
+              // Leave the score at 0 but stop the spinner on failure.
+              if (!active) return;
+              setJobs((prev) =>
+                prev.map((j) => (j.id === row.id ? { ...j, matchPending: false } : j)),
+              );
+            }
+          });
+        }
       } catch (error) {
         if (active) setJobsError(error instanceof Error ? error.message : "Could not load scraped jobs");
       } finally {
