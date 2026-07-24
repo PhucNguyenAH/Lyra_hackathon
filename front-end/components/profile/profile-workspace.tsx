@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  AlertTriangle,
   BriefcaseBusiness,
   Check,
   FileCheck2,
@@ -32,19 +31,16 @@ import { Input } from "@/components/ui/input";
 import {
   CandidatePreferences,
   CVUploadRecord,
-  CVVariant,
   MasterProfile,
   ProfileApiError,
   ProfileRecord,
   deleteCVUpload,
   getCVUploads,
   getProfile,
-  tailorApplication,
   updateMasterProfile,
   updatePreferences,
   uploadCV,
 } from "@/lib/profile-api";
-import { DEMO_SEEDED_APPLICATION_ID, DEMO_SEEDED_JOB } from "@/lib/job-postings-seed";
 import { scrapeJobs, pollJob } from "@/lib/jobs-api";
 import { cn } from "@/lib/utils";
 
@@ -197,9 +193,6 @@ export function ProfileWorkspace({
   const [isUploading, setIsUploading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [variant, setVariant] = useState<CVVariant | null>(null);
-  const [isTailoring, setIsTailoring] = useState(false);
-  const [tailorError, setTailorError] = useState<string | null>(null);
   const [scrapeTitle, setScrapeTitle] = useState("");
   const [scrapeLocation, setScrapeLocation] = useState("");
   const [showScrapeBar, setShowScrapeBar] = useState(false);
@@ -235,7 +228,8 @@ export function ProfileWorkspace({
   }, [onProfileChange]);
 
   useEffect(() => {
-    void loadProfile();
+    const load = window.setTimeout(() => void loadProfile(), 0);
+    return () => window.clearTimeout(load);
   }, [loadProfile]);
 
   const handleUpload = async () => {
@@ -339,31 +333,12 @@ export function ProfileWorkspace({
       const nextProfile = await updatePreferences(USER_ID, EMPTY_PREFERENCES);
       setProfile(nextProfile);
       setPreferences(EMPTY_PREFERENCES);
-      setVariant(null);
       onProfileChange?.(nextProfile);
       toast.success("Profile cleared");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not clear profile");
     } finally {
       setIsClearing(false);
-    }
-  };
-
-  const handleGenerateTailoredCV = async () => {
-    if (!USER_ID) return;
-    setIsTailoring(true);
-    setTailorError(null);
-    try {
-      const result = await tailorApplication(USER_ID, DEMO_SEEDED_APPLICATION_ID);
-      setVariant(result);
-    } catch (error) {
-      setTailorError(
-        error instanceof ProfileApiError
-          ? error.message
-          : "Could not reach the tailoring backend.",
-      );
-    } finally {
-      setIsTailoring(false);
     }
   };
 
@@ -593,55 +568,6 @@ export function ProfileWorkspace({
               </CardContent>
             </Card>
 
-            <Card className="border-0 shadow-sm ring-zinc-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2"><BriefcaseBusiness className="size-4 text-indigo-600" /> Try tailoring</CardTitle>
-                <CardDescription>{DEMO_SEEDED_JOB.title} · {DEMO_SEEDED_JOB.company}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-zinc-500">{DEMO_SEEDED_JOB.description}</p>
-                <Button
-                  type="button"
-                  size="lg"
-                  disabled={isTailoring}
-                  onClick={handleGenerateTailoredCV}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700"
-                >
-                  {isTailoring ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-                  {isTailoring ? "Selecting the best points…" : "Generate tailored CV"}
-                </Button>
-
-                {tailorError && (
-                  <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
-                    <AlertTriangle className="size-3.5 shrink-0" />
-                    {tailorError}
-                  </div>
-                )}
-
-                {variant && (
-                  <div className="space-y-3 rounded-xl border border-zinc-200 p-4 text-sm">
-                    <p className="font-semibold text-zinc-800">{variant.target_summary}</p>
-                    {[...variant.selected_experiences, ...variant.selected_projects]
-                      .sort((a, b) => a.order - b.order)
-                      .map((item) => (
-                        <div key={item.item_id}>
-                          <p className="font-mono text-xs text-zinc-400">{item.item_id}</p>
-                          <p className="mt-0.5 text-xs italic text-zinc-500">{item.why}</p>
-                        </div>
-                      ))}
-                    <div className="flex flex-wrap gap-1.5">
-                      {variant.emphasized_skills.map((skill) => <Badge key={skill} className="h-6 px-2 text-[11px]">{skill}</Badge>)}
-                    </div>
-                    {variant.omitted_notable.length > 0 && (
-                      <p className="text-xs text-zinc-500">
-                        Left out: {variant.omitted_notable.join(", ")}
-                      </p>
-                    )}
-                    <p className="text-xs leading-5 text-zinc-500">{variant.rationale}</p>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
           </div>
         </div>
       )}

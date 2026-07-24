@@ -66,6 +66,7 @@ async def test_start_launches_browser_and_navigates():
     m, browser, vnc, _ = _manager(never)
     res = await m.start()
     assert res["state"] == "awaiting_login"
+    assert res["stream_available"] is True
     assert browser.started is True
     assert browser.page.goto_url and "linkedin.com/login" in browser.page.goto_url
     await m.cancel()

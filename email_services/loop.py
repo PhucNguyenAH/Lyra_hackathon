@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Mapping
+from typing import TypedDict
 
 from dotenv import load_dotenv
 from supabase import Client
@@ -24,10 +25,19 @@ NEEDS_ATTENTION_TABLE = "needs_attention"
 WATCHABLE_STATUSES = ("applied", "interview", "offer")
 WATCHER_TRANSITION_RPC = "apply_watcher_transition"
 ACTIVITY_RPC = "bump_application_activity"
+PREP_MATERIALS_TABLE = "prep_materials"
 
 LOGGER = logging.getLogger("email_services.watcher")
 
 load_dotenv()
+
+
+class PrepDraftRequest(TypedDict):
+    application_id: str
+    source_email_id: str
+    job_id: str
+    company: str
+    job_title: str
 
 
 def _required_environment(name: str) -> str:
@@ -77,7 +87,7 @@ def _eligible_applications(db: Client) -> list[dict[str, object]]:
     """Fetch matcher-ready rows while excluding jobs the user has not applied to."""
     response = (
         db.table(APPLICATION_VIEW)
-        .select("id,company,role,status,last_activity_at")
+        .select("id,job_id,company,role,status,last_activity_at")
         .in_("status", list(WATCHABLE_STATUSES))
         .execute()
     )
@@ -140,7 +150,7 @@ def _process_email(
     db: Client,
     imap_user: str,
     email_data: EmailData,
-) -> Mapping[str, object] | None:
+) -> PrepDraftRequest | None:
     """Keep classification, persistence, and action ordered before IMAP acknowledgement."""
     if _already_persisted(db, imap_user, email_data):
         LOGGER.info(
@@ -200,16 +210,57 @@ def _process_email(
     )
 
     if action == "auto" and classified.intent is EmailIntent.INTERVIEW_INVITE:
-        return application
+        return PrepDraftRequest(
+            application_id=str(application["id"]),
+            source_email_id=email_id,
+            job_id=str(application["job_id"]),
+            company=str(application.get("company") or classified.company_guess or "Unknown company"),
+            job_title=str(application.get("role") or classified.role_guess or "Role not identified"),
+        )
     return None
 
 
-async def generate_prep(application: Mapping[str, object]) -> None:
-    """Reserve a non-blocking extension point for interview preparation generation."""
-    LOGGER.info(
-        "prep_generation_requested",
-        extra={"application_id": application.get("id")},
+def _persist_prep_draft(db: Client, request: PrepDraftRequest) -> None:
+    """Persist one reusable practice draft per source email."""
+    existing = (
+        db.table(PREP_MATERIALS_TABLE)
+        .select("id")
+        .eq("source_email_id", request["source_email_id"])
+        .limit(1)
+        .execute()
     )
+    if _rows(existing.data):
+        return
+    db.table(PREP_MATERIALS_TABLE).insert(
+        {
+            "application_id": request["application_id"],
+            "source_email_id": request["source_email_id"],
+            "content": {
+                "kind": "interview_practice_draft",
+                "status": "ready",
+                "job_id": request["job_id"],
+                "company": request["company"],
+                "job_title": request["job_title"],
+                "suggested_stage": "phone_screen",
+                "created_from": "interview_invite",
+            },
+        }
+    ).execute()
+
+
+async def generate_prep(db: Client, request: PrepDraftRequest) -> None:
+    """Create a durable dashboard-ready draft without blocking mailbox polling."""
+    try:
+        await asyncio.to_thread(_persist_prep_draft, db, request)
+        LOGGER.info(
+            "prep_draft_ready",
+            extra={"application_id": request["application_id"]},
+        )
+    except Exception:
+        LOGGER.exception(
+            "prep_draft_failed",
+            extra={"application_id": request["application_id"]},
+        )
 
 
 async def watcher_loop(db: Client) -> None:
@@ -241,7 +292,7 @@ async def watcher_loop(db: Client) -> None:
                     email_data,
                 )
                 if prep_application is not None:
-                    asyncio.create_task(generate_prep(prep_application))
+                    asyncio.create_task(generate_prep(db, prep_application))
 
                 await asyncio.to_thread(
                     mark_seen,

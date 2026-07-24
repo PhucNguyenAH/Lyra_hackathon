@@ -155,6 +155,22 @@ class WeakTopic(BaseModel):
     drill_suggestion: str
 
 
+class ScoreEvidence(BaseModel):
+    dimension: str = Field(pattern="^(specificity|technical_depth|communication|handling_pressure)$")
+    score: int = Field(ge=1, le=5)
+    evidence: str
+
+
+class CVCoachingSuggestion(BaseModel):
+    """An interview gap tied to one exact, existing master-profile bullet."""
+
+    item_id: str
+    source_bullet: str
+    issue: str = Field(pattern="^(missing_metric|unclear_ownership|weak_result|weak_tradeoff|unclear_scope)$")
+    suggestion: str
+    interview_evidence: str
+
+
 class ReportScores(BaseModel):
     specificity: int = Field(ge=1, le=5)
     technical_depth: int = Field(ge=1, le=5)
@@ -176,6 +192,18 @@ class FeedbackReport(BaseModel):
     per_topic: list[TopicFeedback]
     weak_topics: list[WeakTopic] = Field(min_length=2, max_length=3)
     one_thing: str
+    score_evidence: list[ScoreEvidence] = Field(default_factory=list, max_length=4)
+    cv_suggestions: list[CVCoachingSuggestion] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def score_evidence_matches_scores(self) -> "FeedbackReport":
+        if not self.score_evidence:
+            return self
+        expected = self.scores.model_dump()
+        supplied = {item.dimension: item.score for item in self.score_evidence}
+        if supplied != expected:
+            raise ValueError("score_evidence must contain one matching entry for every score")
+        return self
 
 
 class SessionConfig(BaseModel):

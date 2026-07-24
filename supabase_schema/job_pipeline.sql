@@ -171,6 +171,10 @@ create table prep_materials (
 create index idx_prep_materials_application
     on prep_materials(application_id, created_at desc);
 
+create unique index idx_prep_materials_source_email
+    on prep_materials(source_email_id)
+    where source_email_id is not null;
+
 
 -- Any status change refreshes application activity.
 create or replace function bump_last_activity_on_status_change()

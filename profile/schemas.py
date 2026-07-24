@@ -176,3 +176,13 @@ class CVVariant(BaseModel):
     emphasized_skills: list[str] = Field(default_factory=list)
     omitted_notable: list[str] = Field(default_factory=list)
     rationale: str
+
+
+class InterviewCVSuggestion(BaseModel):
+    item_id: str
+    source_bullet: str
+    issue: str
+    suggestion: str
+    interview_evidence: str
+    occurrences: int = Field(ge=1)
+    latest_session_id: str

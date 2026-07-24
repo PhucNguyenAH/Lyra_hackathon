@@ -72,6 +72,21 @@ def test_double_start_returns_409(monkeypatch):
             assert r.status_code == 409
 
 
+def test_unavailable_login_display_returns_actionable_503(monkeypatch):
+    main = _client(monkeypatch)
+
+    class Unavailable(FakeManager):
+        async def start(self):
+            raise RuntimeError("Interactive LinkedIn login needs a display")
+
+    with patch("api.main.BrowserManager", FakeBrowserManager):
+        with TestClient(main.app) as client:
+            client.app.state.login_manager = Unavailable()
+            r = client.post("/auth/session/start", headers={"X-Admin-Token": "secret"})
+            assert r.status_code == 503
+            assert "needs a display" in r.json()["detail"]
+
+
 def test_vnc_rejects_bad_token(monkeypatch):
     main = _client(monkeypatch)
     with patch("api.main.BrowserManager", FakeBrowserManager):

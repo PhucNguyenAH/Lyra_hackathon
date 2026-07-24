@@ -15,6 +15,8 @@ async def start_session(request: Request):
         return await manager.start()
     except LoginInProgress:
         raise HTTPException(status_code=409, detail="a login session is already active")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 @router.get("/session/status")

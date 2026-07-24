@@ -2,6 +2,8 @@
 import asyncio
 import logging
 import os
+import shutil
+import sys
 from contextlib import asynccontextmanager
 
 logger = logging.getLogger("api.main")
@@ -111,10 +113,26 @@ async def _start_x11vnc():
     the only thing that ever connects to it. If this is ever changed to bind
     a non-localhost address, add a VNC password (or equivalent auth) first.
     """
+    display = os.environ.get("DISPLAY")
+    if not sys.platform.startswith("linux") or not display or shutil.which("x11vnc") is None:
+        logger.info(
+            "VNC streaming is unavailable on this host; using the local headed login browser"
+        )
+        return None
     return await asyncio.create_subprocess_exec(
-        "x11vnc", "-display", ":99", "-forever", "-shared",
+        "x11vnc", "-display", display, "-forever", "-shared",
         "-nopw", "-localhost", "-rfbport", "5900", "-quiet",
     )
+
+
+def _create_login_browser() -> BrowserManager:
+    """Open locally on desktop OSes, or on the configured Linux virtual display."""
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        raise RuntimeError(
+            "Interactive LinkedIn login needs a display. Run the Docker image, "
+            "or start Xvfb and set DISPLAY before starting the backend."
+        )
+    return BrowserManager(headless=False, viewport={"width": 1280, "height": 800})
 
 
 @asynccontextmanager
@@ -147,9 +165,7 @@ async def lifespan(app: FastAPI):
     app.state.store = JobStore()
     app.state.jobs_repo = build_jobs_repository(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     app.state.login_manager = LoginSessionManager(
-        browser_factory=lambda: BrowserManager(
-            headless=False, viewport={"width": 1280, "height": 800}
-        ),
+        browser_factory=_create_login_browser,
         vnc_starter=_start_x11vnc,
         login_waiter=wait_for_manual_login,
         on_saved=_make_on_saved(store, SESSION_FILE, scraper),

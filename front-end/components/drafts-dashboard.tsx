@@ -32,6 +32,7 @@ import {
   MapPin,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Sparkles,
   UploadCloud,
@@ -112,8 +113,20 @@ type ApplicationResponse = {
   last_activity_at: string;
 };
 
+type InterviewPrepDraft = {
+  id: string;
+  job_id: string;
+  company: string;
+  job_title: string;
+  suggested_stage: string;
+  created_at: string;
+};
+
 interface DraftsDashboardProps {
   jobs: JobMatching[];
+  jobsLoading: boolean;
+  jobsError: string | null;
+  onRefreshJobs: () => void;
   onTailorCV: (jobId: string) => void;
 }
 
@@ -133,7 +146,7 @@ const EMPTY_PROFILE_PREFERENCES: CandidatePreferences = {
   work_authorization: "",
   salary_expectation: "",
 };
-export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
+export function DraftsDashboard({ jobs, jobsLoading, jobsError, onRefreshJobs, onTailorCV }: DraftsDashboardProps) {
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileRecord, setProfileRecord] = useState<ProfileRecord | null>(null);
   const [profileForm, setProfileForm] = useState<CandidatePreferences>(EMPTY_PROFILE_PREFERENCES);
@@ -149,6 +162,7 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
   const [jobSearch, setJobSearch] = useState("");
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
   const [emailDecisions, setEmailDecisions] = useState<EmailDecision[]>([]);
+  const [interviewPrep, setInterviewPrep] = useState<InterviewPrepDraft[]>([]);
   const [emailLoading, setEmailLoading] = useState(true);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailActionId, setEmailActionId] = useState<string | null>(null);
@@ -316,10 +330,15 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
     let active = true;
     const loadNotifications = async () => {
       try {
-        const response = await fetch(`${EMAIL_API_URL}/email-services/notifications`, { cache: "no-store" });
-        if (!response.ok) throw new Error("Email notifications are temporarily unavailable");
-        const notifications = await response.json() as EmailNotificationResponse[];
+        const [notificationResponse, prepResponse] = await Promise.all([
+          fetch(`${EMAIL_API_URL}/email-services/notifications`, { cache: "no-store" }),
+          fetch(`${EMAIL_API_URL}/email-services/interview-prep`, { cache: "no-store" }),
+        ]);
+        if (!notificationResponse.ok || !prepResponse.ok) throw new Error("Email notifications are temporarily unavailable");
+        const notifications = await notificationResponse.json() as EmailNotificationResponse[];
+        const prepDrafts = await prepResponse.json() as InterviewPrepDraft[];
         if (!active) return;
+        setInterviewPrep(prepDrafts);
         setEmailDecisions(notifications.map((notification) => ({
           id: notification.id,
           company: notification.company,
@@ -442,6 +461,32 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
             <div className="ml-auto flex shrink-0 items-center justify-end gap-2"><select aria-label="Filter jobs by application status" value={applicationFilter} onChange={(event) => setApplicationFilter(event.target.value as ApplicationStatus | "ALL")} className="h-9 w-24 shrink-0 rounded-md border border-zinc-200 bg-white px-2 text-xs sm:w-32 dark:border-zinc-800 dark:bg-zinc-950"><option value="ALL">All statuses</option>{APPLICATION_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select><div className="relative w-[clamp(8rem,20vw,14rem)] shrink-0"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" /><Input value={jobSearch} onChange={(event) => setJobSearch(event.target.value)} placeholder="Search jobs or skills" className="h-9 min-w-0 pl-9 text-sm" /></div></div>
           </CardHeader>
           <CardContent className="h-[calc(100dvh-20rem)] max-h-[648px] min-w-0 space-y-2 overflow-y-auto overscroll-contain px-3 pb-6 pt-3">
+            {jobsLoading && (
+              <div className="flex h-48 items-center justify-center gap-2 text-sm text-zinc-500">
+                <LoaderCircle className="h-4 w-4 animate-spin" />Loading scraped jobs…
+              </div>
+            )}
+            {!jobsLoading && jobsError && (
+              <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-rose-200 bg-rose-50 p-5 text-center dark:border-rose-900 dark:bg-rose-950/20">
+                <p className="text-sm font-semibold text-rose-800 dark:text-rose-300">Could not load scraped jobs</p>
+                <p className="mt-1 text-xs text-rose-700 dark:text-rose-400">{jobsError}</p>
+                <Button size="sm" variant="outline" className="mt-3" onClick={onRefreshJobs}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Try again</Button>
+              </div>
+            )}
+            {!jobsLoading && !jobsError && jobs.length === 0 && (
+              <div className="flex h-56 flex-col items-center justify-center rounded-xl border border-dashed border-zinc-300 bg-zinc-50 p-6 text-center dark:border-zinc-700 dark:bg-zinc-900">
+                <BriefcaseBusiness className="h-6 w-6 text-indigo-600" />
+                <p className="mt-3 text-sm font-semibold">No scraped jobs yet</p>
+                <p className="mt-1 max-w-sm text-xs leading-relaxed text-zinc-500">Connect LinkedIn, open your profile, and run your first title-and-location search. Only jobs saved by the scraper appear here.</p>
+                <div className="mt-4 flex gap-2">
+                  <Button size="sm" onClick={() => { window.location.href = "/profile"; }}>Find jobs</Button>
+                  <Button size="sm" variant="outline" onClick={onRefreshJobs}><RefreshCw className="mr-1.5 h-3.5 w-3.5" />Refresh</Button>
+                </div>
+              </div>
+            )}
+            {!jobsLoading && !jobsError && jobs.length > 0 && filteredJobs.length === 0 && (
+              <div className="flex h-40 items-center justify-center text-center text-sm text-zinc-500">No scraped jobs match this search or status filter.</div>
+            )}
             {filteredJobs.map((job) => {
               const expanded = expandedJobId === job.id;
               const gaps = job.skillsRequired.filter((skill) => !job.skillsMatched.includes(skill));
@@ -454,10 +499,13 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
                     <div className="flex shrink-0 flex-col items-end gap-1.5"><MatchBadge score={job.matchScore} /><ApplicationStatusBadge status={applicationStatus} /></div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-                    <button type="button" onClick={() => setExpandedJobId(expanded ? null : job.id)} className="flex items-center gap-1 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-400">{expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{expanded ? "Hide match details" : `${job.skillsMatched.length} skills matched`}</button>
+                    <button type="button" onClick={() => setExpandedJobId(expanded ? null : job.id)} className="flex items-center gap-1 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-400">{expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{expanded ? "Hide details" : job.skillsRequired.length > 0 ? `${job.skillsMatched.length} skills matched` : "View job details"}</button>
                     <div className="flex flex-wrap items-center gap-2">{applicationStatus === "NOT APPLIED" ? <Button size="sm" onClick={() => { if (job.url) window.open(job.url, "_blank", "noopener,noreferrer"); void updateApplicationStatus(job.id, "APPLIED"); }} className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-700"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Apply</Button> : <select aria-label={`Update ${job.title} application status`} value={applicationStatus} onChange={(event) => void updateApplicationStatus(job.id, event.target.value as ApplicationStatus)} className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[11px] font-semibold dark:border-zinc-800 dark:bg-zinc-950">{APPLICATION_STATUSES.filter((status) => status !== "NOT APPLIED").map((status) => <option key={status} value={status}>{status}</option>)}</select>}<Button size="sm" variant="outline" onClick={() => onTailorCV(job.id)} className="h-8 text-xs"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Enhance CV</Button></div>
                   </div>
-                  {expanded && <div className="mt-3 grid gap-3 rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-900 sm:grid-cols-2"><div><p className="font-semibold text-emerald-700 dark:text-emerald-400">Matched</p><p className="mt-1 leading-relaxed text-zinc-500">{job.skillsMatched.join(", ")}</p></div><div><p className="font-semibold text-amber-700 dark:text-amber-400">Gaps to review</p><p className="mt-1 leading-relaxed text-zinc-500">{gaps.join(", ") || "No major gaps detected"}</p></div></div>}
+                  {expanded && (job.skillsRequired.length > 0
+                    ? <div className="mt-3 grid gap-3 rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-900 sm:grid-cols-2"><div><p className="font-semibold text-emerald-700 dark:text-emerald-400">Matched</p><p className="mt-1 leading-relaxed text-zinc-500">{job.skillsMatched.join(", ") || "No matched skills yet"}</p></div><div><p className="font-semibold text-amber-700 dark:text-amber-400">Gaps to review</p><p className="mt-1 leading-relaxed text-zinc-500">{gaps.join(", ") || "No major gaps detected"}</p></div></div>
+                    : <div className="mt-3 rounded-lg bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300">{job.description || "The scraper did not return a description for this job."}</div>
+                  )}
                 </article>
               );
             })}
@@ -467,6 +515,20 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
         <Card className="h-fit gap-0 overflow-hidden py-0 shadow-sm">
           <CardHeader className="border-b border-zinc-100 px-5 py-4 dark:border-zinc-800"><CardTitle className="flex items-center justify-between text-base"><span className="flex items-center gap-2"><Mail className="h-4 w-4 text-indigo-600" />Email decisions</span><Badge variant="secondary">{pendingCount} pending</Badge></CardTitle><p className="mt-1 text-xs text-zinc-500">Uncertain inbox updates wait here for your decision.</p></CardHeader>
           <CardContent className="space-y-3 p-3">
+            {interviewPrep.map((prep) => (
+              <article key={prep.id} className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 dark:border-indigo-900 dark:bg-indigo-950/20">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white"><BriefcaseBusiness className="h-4 w-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">Interview detected — practice is ready</p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-600 dark:text-zinc-300">{prep.job_title} at {prep.company}</p>
+                    <Button size="sm" className="mt-3 h-8 text-xs" onClick={() => { window.location.href = `/interviews?jobId=${encodeURIComponent(prep.job_id)}&stage=${encodeURIComponent(prep.suggested_stage)}`; }}>
+                      Start tailored practice
+                    </Button>
+                  </div>
+                </div>
+              </article>
+            ))}
             {emailLoading && <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500"><LoaderCircle className="h-4 w-4 animate-spin" />Checking your inbox decisions…</div>}
             {!emailLoading && emailError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-900 dark:bg-rose-950/20 dark:text-rose-400">{emailError}</div>}
             {!emailLoading && !emailError && emailDecisions.length === 0 && <div className="py-8 text-center"><Check className="mx-auto h-5 w-5 text-emerald-600" /><p className="mt-2 text-sm font-semibold">No decisions waiting</p><p className="mt-1 text-xs text-zinc-500">New uncertain application emails will appear here.</p></div>}
@@ -565,6 +627,7 @@ function cleanList(values: string[]): string[] {
 }
 
 function MatchBadge({ score }: { score: number }) {
+  if (score <= 0) return <Badge variant="secondary" className="shrink-0 px-2 py-1 text-[10px]">Not scored</Badge>;
   return <Badge className={cn("shrink-0 border px-2 py-1 text-[10px] font-bold shadow-none", score >= 85 ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400" : score >= 70 ? "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-400" : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-400")}>{score}% match</Badge>;
 }
 

@@ -16,6 +16,8 @@ class FakeTable:
         self._rows = rows
         self.upserted = None
         self.on_conflict = None
+        self.inserted = None
+        self.updated = None
 
     def upsert(self, row, on_conflict=None):
         self.upserted = row
@@ -23,6 +25,17 @@ class FakeTable:
         return self
 
     def select(self, *a, **k):
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def insert(self, row):
+        self.inserted = row
+        return self
+
+    def update(self, row):
+        self.updated = row
         return self
 
     def order(self, *a, **k):
@@ -43,11 +56,10 @@ class FakeClient:
         return self._table
 
 
-def test_upsert_maps_fields_and_conflicts_on_url():
+def test_upsert_maps_fields_and_inserts_when_url_is_new():
     c = FakeClient()
     JobsRepository(c).upsert(JOB)
-    assert c._table.on_conflict == "url"
-    assert c._table.upserted == {
+    assert c._table.inserted == {
         "role": "AI Engineer", "company": "Acme",
         "url": "https://www.linkedin.com/jobs/view/123/",
         "location": "Sydney", "description": "Build.",
@@ -57,13 +69,21 @@ def test_upsert_maps_fields_and_conflicts_on_url():
 def test_upsert_skips_no_company():
     c = FakeClient()
     JobsRepository(c).upsert({**JOB, "company": None})
-    assert c._table.upserted is None   # never called
+    assert c._table.inserted is None
 
 
 def test_list_jobs_returns_rows():
-    rows = [{"id": "1", "role": "AI Engineer", "company": "Acme"}]
+    rows = [{"id": "1", "role": "AI Engineer", "company": "Acme", "url": "https://www.linkedin.com/jobs/view/123/"}]
     c = FakeClient(rows=rows)
     assert JobsRepository(c).list_jobs() == rows
+
+
+def test_list_jobs_excludes_legacy_non_scraper_rows():
+    rows = [
+        {"id": "seed", "role": "Backend Engineer", "company": "Demo", "url": "https://example.com/jobs/1"},
+        {"id": "scraped", "role": "AI Engineer", "company": "Acme", "url": "https://www.linkedin.com/jobs/view/123/"},
+    ]
+    assert JobsRepository(FakeClient(rows=rows)).list_jobs() == [rows[1]]
 
 
 def test_build_returns_none_when_unconfigured():

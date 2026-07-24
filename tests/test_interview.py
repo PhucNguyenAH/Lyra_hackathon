@@ -1,6 +1,7 @@
 """Fast unit coverage for interview prompts and code-enforced movement."""
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from interview.evaluator import evaluate_session
 from interview.question_gen import build_question_prompt, generate_topics
@@ -9,6 +10,10 @@ from interview.schemas import (
     ChatMessage,
     DeliveryEvidence,
     FeedbackReport,
+    HiringProcessResearch,
+    HiringStage,
+    HiringStageCategory,
+    HiringStageEvidence,
     InterviewStage,
     InterviewState,
     NextMove,
@@ -19,6 +24,7 @@ from interview.schemas import (
     WeakTopic,
 )
 from interview.turn import analyze, build_turn_prompt, next_move
+from profile.schemas import Experience, MasterProfile
 
 
 def topic(topic_id: str = "api-caching") -> Topic:
@@ -141,6 +147,47 @@ def test_question_prompt_prioritizes_previous_weakness_and_cv() -> None:
     assert "Do not challenge" in prompt
 
 
+def test_question_prompt_uses_research_for_the_selected_round_only() -> None:
+    research = HiringProcessResearch(
+        company="Stripe",
+        job_title="Backend Engineer",
+        summary="Reported multi-stage process",
+        stages=[
+            HiringStage(
+                name="Technical screen",
+                category=HiringStageCategory.EXPERIENCE_TECHNICAL,
+                description="Focuses on API design trade-offs and debugging production systems.",
+                evidence=[HiringStageEvidence(title="Stripe interview guide", url="https://example.com/stripe")],
+                confidence=0.91,
+                practice_supported=True,
+            ),
+            HiringStage(
+                name="Recruiter call",
+                category=HiringStageCategory.PHONE_SCREEN,
+                description="Covers motivation and availability.",
+                confidence=0.8,
+                practice_supported=True,
+            ),
+        ],
+        researched_at=datetime.now(UTC),
+        confidence=0.9,
+    )
+
+    prompt = build_question_prompt(
+        "Built a payments API with retries and idempotency.",
+        "Backend Engineer at Stripe",
+        [],
+        "Junior",
+        InterviewStage.EXPERIENCE_TECHNICAL,
+        research,
+    )
+
+    assert "API design trade-offs and debugging production systems" in prompt
+    assert "Stripe interview guide" in prompt
+    assert "motivation and availability" not in prompt
+    assert "shape at least 2 topics" in prompt
+
+
 def test_question_prompt_keeps_platform_rounds_conversational() -> None:
     phone_prompt = build_question_prompt(
         "Built a banking API at CloudCorp.",
@@ -224,6 +271,43 @@ def test_evaluator_receives_transcript_and_returns_typed_report() -> None:
     user_message = client.completions.calls[0]["messages"]
     assert result == report
     assert "I used Redis" in str(user_message)
+
+
+def test_evaluator_keeps_only_exact_master_bullet_cv_suggestions() -> None:
+    source_bullet = "Reduced API latency by 30% after adding Redis caching."
+    report = FeedbackReport.model_validate(
+        {
+            "overall": "Impact was not explained clearly.",
+            "scores": {"specificity": 2, "technical_depth": 3, "communication": 3, "handling_pressure": 3},
+            "score_evidence": [
+                {"dimension": "specificity", "score": 2, "evidence": "The answer omitted the measured result."},
+                {"dimension": "technical_depth", "score": 3, "evidence": "Redis was named but invalidation was unclear."},
+                {"dimension": "communication", "score": 3, "evidence": "The answer was understandable but incomplete."},
+                {"dimension": "handling_pressure", "score": 3, "evidence": "There was insufficient follow-up evidence."},
+            ],
+            "per_topic": [{"topic_id": "api-caching", "verdict_summary": "Missing result", "what_they_said": "I added Redis", "what_was_missing": "Measured impact", "stronger_answer": "I added Redis and would explain the measured result."}],
+            "weak_topics": [
+                {"topic": "Impact", "why_weak": "Result omitted", "drill_suggestion": "State the verified latency change"},
+                {"topic": "Ownership", "why_weak": "Contribution unclear", "drill_suggestion": "Use first-person actions"},
+            ],
+            "one_thing": "Connect the implementation to its verified result.",
+            "cv_suggestions": [
+                {"item_id": "exp-cloud", "source_bullet": source_bullet, "issue": "weak_result", "suggestion": "Clarify which measurement you personally verified.", "interview_evidence": "The answer omitted the 30% result."},
+                {"item_id": "exp-cloud", "source_bullet": "Invented bullet", "issue": "missing_metric", "suggestion": "Add a number.", "interview_evidence": "No number was stated."},
+            ],
+        }
+    )
+    client = FakeClient(lambda _: report)
+    master = MasterProfile(
+        experiences=[Experience(id="exp-cloud", role="Intern", org="Cloud", bullets=[source_bullet])]
+    )
+    state = InterviewState(topic_states=[TopicState(topic_id="api-caching")])
+
+    result = evaluate_session([topic()], state, client, master_profile=master)
+
+    assert len(result.cv_suggestions) == 1
+    assert result.cv_suggestions[0].source_bullet == source_bullet
+    assert "master_profile" in str(client.completions.calls[0]["messages"])
 
 
 def test_evaluator_uses_round_specific_score_expectations() -> None:

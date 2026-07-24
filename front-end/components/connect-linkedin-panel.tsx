@@ -15,9 +15,12 @@ export function ConnectLinkedInPanel() {
   const [token, setToken] = useState("");
   const [state, setState] = useState<State>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [usesLocalBrowser, setUsesLocalBrowser] = useState(false);
   const screenRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<unknown>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const backendBase = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "").replace(/\/$/, "");
+  const authUrl = (path: string) => `${backendBase || "/api"}/auth/session/${path}`;
 
   useEffect(() => {
     return () => {
@@ -29,37 +32,41 @@ export function ConnectLinkedInPanel() {
 
   async function start() {
     setError(null);
-    const res = await fetch("/api/auth/session/start", {
+    const res = await fetch(authUrl("start"), {
       method: "POST",
       headers: { "X-Admin-Token": token },
     });
     if (!res.ok) {
       setState("error");
-      setError(res.status === 401 ? "Invalid admin token" : `Start failed (${res.status})`);
+      const payload = await res.json().catch(() => null) as { detail?: string } | null;
+      setError(res.status === 401 ? "Invalid admin token" : payload?.detail || `Start failed (${res.status})`);
       return;
     }
-    // @ts-expect-error - @novnc/novnc has no type declarations for its package entry point
-    const { default: RFB } = await import("@novnc/novnc");
-    // The VNC websocket connects DIRECTLY to the backend when a public backend
-    // URL is configured, because Next.js rewrites do not reliably forward
-    // WebSocket upgrades to external hosts. The HTTP start/status/cancel calls
-    // above still go through the same-origin /api/* rewrite.
-    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL; // e.g. https://backend.up.railway.app
-    let url: string;
-    if (backendBase) {
-      const wsBase = backendBase.replace(/^http/, "ws"); // https->wss, http->ws
-      url = `${wsBase}/auth/session/vnc?token=${encodeURIComponent(token)}`; // NOTE: /auth not /api/auth when going direct
-    } else {
-      const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      url = `${proto}://${window.location.host}/api/auth/session/vnc?token=${encodeURIComponent(token)}`;
+    const data = await res.json() as { stream_available?: boolean };
+    const streamAvailable = data.stream_available !== false;
+    setUsesLocalBrowser(!streamAvailable);
+    if (streamAvailable) {
+      // @ts-expect-error - @novnc/novnc has no type declarations for its package entry point
+      const { default: RFB } = await import("@novnc/novnc");
+      // The VNC websocket connects DIRECTLY to the backend when a public backend
+      // URL is configured, because Next.js rewrites do not reliably forward
+      // WebSocket upgrades to external hosts.
+      let url: string;
+      if (backendBase) {
+        const wsBase = backendBase.replace(/^http/, "ws");
+        url = `${wsBase}/auth/session/vnc?token=${encodeURIComponent(token)}`;
+      } else {
+        const proto = window.location.protocol === "https:" ? "wss" : "ws";
+        url = `${proto}://${window.location.host}/api/auth/session/vnc?token=${encodeURIComponent(token)}`;
+      }
+      rfbRef.current = new RFB(screenRef.current as HTMLElement, url);
     }
-    rfbRef.current = new RFB(screenRef.current as HTMLElement, url);
     setState("awaiting_login");
     pollRef.current = setInterval(pollStatus, 2000);
   }
 
   async function pollStatus() {
-    const res = await fetch(`/api/auth/session/status?token=${encodeURIComponent(token)}`);
+    const res = await fetch(`${authUrl("status")}?token=${encodeURIComponent(token)}`);
     if (!res.ok) return;
     const data = await res.json();
     setState(data.state);
@@ -75,7 +82,7 @@ export function ConnectLinkedInPanel() {
   }
 
   async function cancel() {
-    await fetch("/api/auth/session/cancel", {
+    await fetch(authUrl("cancel"), {
       method: "POST",
       headers: { "X-Admin-Token": token },
     });
@@ -108,11 +115,20 @@ export function ConnectLinkedInPanel() {
       )}
 
       {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {usesLocalBrowser && state === "awaiting_login" && (
+        <p>LinkedIn opened in a separate browser window. Complete login there; this page will update automatically.</p>
+      )}
       {state === "saved" && <p style={{ color: "green" }}>✅ Session saved — scraping is ready.</p>}
 
       <div
         ref={screenRef}
-        style={{ width: "100%", height: 640, background: "#111", borderRadius: 8 }}
+        style={{
+          display: usesLocalBrowser ? "none" : "block",
+          width: "100%",
+          height: 640,
+          background: "#111",
+          borderRadius: 8,
+        }}
       />
     </main>
   );

@@ -23,6 +23,7 @@ ATTENTION_TABLE = "needs_attention"
 EMAILS_TABLE = "emails"
 APPLICATION_VIEW = "application_overview"
 APPLICATIONS_TABLE = "applications"
+PREP_MATERIALS_TABLE = "prep_materials"
 TRANSITION_RPC = "apply_watcher_transition"
 API_PREFIX = "/email-services"
 DEFAULT_FRONTEND_ORIGIN = "http://localhost:3001"
@@ -80,6 +81,18 @@ class ApplicationStatusUpdate(BaseModel):
     """Constrain manual board movements to statuses supported by Supabase."""
 
     status: ApplicationStatus
+
+
+class InterviewPrepDraft(BaseModel):
+    """A persisted handoff from an interview email to the practice workspace."""
+
+    id: str
+    application_id: str
+    job_id: str
+    company: str
+    job_title: str
+    suggested_stage: str
+    created_at: str
 
 
 def _required_environment(name: str) -> str:
@@ -258,6 +271,42 @@ def list_notifications() -> list[EmailNotification]:
             )
         )
     return notifications
+
+
+@router.get("/interview-prep", response_model=list[InterviewPrepDraft])
+def list_interview_prep() -> list[InterviewPrepDraft]:
+    """Expose ready practice drafts without giving the browser direct database access."""
+    db = create_watcher_db_client()
+    response = (
+        db.table(PREP_MATERIALS_TABLE)
+        .select("id,application_id,content,created_at")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    rows = response.data if isinstance(response.data, list) else []
+    drafts: list[InterviewPrepDraft] = []
+    for raw_row in rows:
+        if not isinstance(raw_row, dict) or not isinstance(raw_row.get("content"), dict):
+            continue
+        row = dict(raw_row)
+        content = dict(row["content"])
+        if content.get("kind") != "interview_practice_draft" or content.get("status") != "ready":
+            continue
+        required_content = ("job_id", "company", "job_title")
+        if any(not content.get(field) for field in required_content):
+            continue
+        drafts.append(
+            InterviewPrepDraft(
+                id=str(row["id"]),
+                application_id=str(row["application_id"]),
+                job_id=str(content["job_id"]),
+                company=str(content["company"]),
+                job_title=str(content["job_title"]),
+                suggested_stage=str(content.get("suggested_stage") or "phone_screen"),
+                created_at=str(row["created_at"]),
+            )
+        )
+    return drafts
 
 
 @router.post("/needs-attention/{attention_id}/confirm", response_model=AttentionActionResult)

@@ -5,14 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/dashboard-layout";
 import { DraftsDashboard, CVDraft } from "@/components/drafts-dashboard";
 import { type JobPosting } from "@/components/jobs-dashboard";
-import { JOB_POSTINGS_SEED, sortAustraliaFirst } from "@/lib/job-postings-seed";
 import { CVEditorWorkspace } from "@/components/cv-editor/cv-editor-workspace";
 import { InterviewWorkspace } from "@/components/interview-practice/interview-workspace";
 import { ApplicationPipeline } from "@/components/application-pipeline";
 import { CVData } from "@/components/cv-editor/cv-pdf-preview";
 import { CheckCircle2, LoaderCircle, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { getProfile, tailorPreview, matchJob } from "@/lib/profile-api";
+import { getInterviewCVSuggestions, getProfile, tailorPreview, matchJob } from "@/lib/profile-api";
 import { buildTailoredCV } from "@/lib/cv-tailoring";
 import { listJobs } from "@/lib/jobs-api";
 
@@ -118,74 +117,87 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
     window.localStorage.setItem(CV_DATABASE_STORAGE_KEY, JSON.stringify(cvDatabase));
   }, [cvDatabase]);
 
-  // Hoisted Jobs State — real seed pool only, Australia-based roles first, best score first within that.
-  const [jobs, setJobs] = useState<JobPosting[]>(() =>
-    sortAustraliaFirst(JOB_POSTINGS_SEED).map((posting) => {
-      const matchedCount = Math.round(posting.skills.length * (posting.score / 10));
-      return {
-        id: posting.id,
-        title: posting.title,
-        company: posting.company,
-        location: posting.location,
-        matchScore: Math.round(posting.score * 10),
-        skillsRequired: posting.skills,
-        skillsMatched: posting.skills.slice(0, matchedCount),
-        description: posting.description,
-        url: posting.url,
-      };
-    }),
-  );
+  const [jobs, setJobs] = useState<JobPosting[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(true);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [jobsRefreshVersion, setJobsRefreshVersion] = useState(0);
 
-  // Fetch persisted jobs from Supabase (via scraper backend) on mount; keep the
-  // seed above as the fallback when the DB has nothing yet. Then score each job's
-  // fit against the user's resume with the LLM match endpoint (a few at a time).
+  // Supabase, populated by the scraper, is the only job source. Poll so jobs
+  // appear automatically when a scrape started from /profile completes, and
+  // score each newly-seen job's fit against the resume with the LLM match
+  // endpoint (a few at a time). Scores are kept across polls and each job is
+  // only matched once, so re-polling doesn't re-trigger the LLM or wipe scores.
   useEffect(() => {
-    listJobs()
-      .then((rows) => {
-        if (!rows.length) return;
-        const canMatch = Boolean(CONFIGURED_USER_ID);
-        const mapped: JobPosting[] = rows.map((r) => ({
-          id: r.id,
-          title: r.role,
-          company: r.company,
-          location: r.location ?? "",
-          matchScore: 0,
-          skillsRequired: [],
-          skillsMatched: [],
-          description: r.description ?? undefined,
-          url: r.url ?? undefined,
-          matchPending: canMatch && Boolean(r.description),
-        }));
-        setJobs(mapped);
-
-        if (!canMatch) return;
-        const toMatch = mapped.filter((job) => job.matchPending && job.description);
-        void mapWithConcurrency(toMatch, 4, async (job) => {
-          try {
-            const result = await matchJob(CONFIGURED_USER_ID, job.description as string);
-            setJobs((prev) =>
-              prev.map((j) =>
-                j.id === job.id
-                  ? {
-                      ...j,
-                      matchScore: result.match_score,
-                      skillsRequired: result.required_skills,
-                      skillsMatched: result.matched_skills,
-                      matchPending: false,
-                    }
-                  : j,
-              ),
-            );
-          } catch {
-            // Leave the score at 0 but stop the spinner on failure.
-            setJobs((prev) =>
-              prev.map((j) => (j.id === job.id ? { ...j, matchPending: false } : j)),
-            );
-          }
+    let active = true;
+    const scoredIds = new Set<string>();
+    const canMatch = Boolean(CONFIGURED_USER_ID);
+    const loadJobs = async () => {
+      try {
+        const rows = await listJobs();
+        if (!active) return;
+        setJobs((prev) => {
+          const prevById = new Map(prev.map((job) => [job.id, job]));
+          return rows.map((row) => {
+            const existing = prevById.get(row.id);
+            if (existing) return existing;
+            return {
+              id: row.id,
+              title: row.role,
+              company: row.company,
+              location: row.location ?? "",
+              matchScore: 0,
+              skillsRequired: [],
+              skillsMatched: [],
+              description: row.description ?? undefined,
+              url: row.url ?? undefined,
+              matchPending: canMatch && Boolean(row.description),
+            };
+          });
         });
-      })
-      .catch(() => {});
-  }, []);
+        setJobsError(null);
+
+        if (canMatch) {
+          const toMatch = rows.filter((row) => row.description && !scoredIds.has(row.id));
+          for (const row of toMatch) scoredIds.add(row.id);
+          void mapWithConcurrency(toMatch, 4, async (row) => {
+            try {
+              const result = await matchJob(CONFIGURED_USER_ID, row.description as string);
+              if (!active) return;
+              setJobs((prev) =>
+                prev.map((j) =>
+                  j.id === row.id
+                    ? {
+                        ...j,
+                        matchScore: result.match_score,
+                        skillsRequired: result.required_skills,
+                        skillsMatched: result.matched_skills,
+                        matchPending: false,
+                      }
+                    : j,
+                ),
+              );
+            } catch {
+              // Leave the score at 0 but stop the spinner on failure.
+              if (!active) return;
+              setJobs((prev) =>
+                prev.map((j) => (j.id === row.id ? { ...j, matchPending: false } : j)),
+              );
+            }
+          });
+        }
+      } catch (error) {
+        if (active) setJobsError(error instanceof Error ? error.message : "Could not load scraped jobs");
+      } finally {
+        if (active) setJobsLoading(false);
+      }
+    };
+    void loadJobs();
+    const poll = window.setInterval(() => void loadJobs(), 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+    };
+  }, [jobsRefreshVersion]);
 
   // Handle Select Draft from Dashboard
   const handleSelectDraft = (id: string) => {
@@ -285,6 +297,7 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       setTailoringState({ job, phase: "analyzing" });
       let variant: Awaited<ReturnType<typeof tailorPreview>>;
       let profile: Awaited<ReturnType<typeof getProfile>>;
+      let interviewSuggestions: Awaited<ReturnType<typeof getInterviewCVSuggestions>>;
       try {
         const userId = getBuilderUserId();
         const jdText = [
@@ -292,9 +305,10 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
           job.description,
           `Required skills: ${job.skillsRequired.join(", ")}.`,
         ].filter(Boolean).join(" ");
-        [profile, variant] = await Promise.all([
+        [profile, variant, interviewSuggestions] = await Promise.all([
           getProfile(userId),
           tailorPreview(userId, jdText),
+          getInterviewCVSuggestions(userId),
         ]);
       } catch (error) {
         toast.error(
@@ -309,6 +323,15 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       await new Promise((resolve) => window.setTimeout(resolve, 400));
       const jobDraftId = `draft-${job.id}-${Date.now()}`;
       const matchSuggestions = [
+        ...interviewSuggestions.map((suggestion) => ({
+          id: `${jobDraftId}-interview-${suggestion.latest_session_id}-${suggestion.item_id}-${suggestion.issue}`,
+          title: suggestion.occurrences > 1
+            ? `Recurring interview gap · ${suggestion.occurrences} sessions`
+            : "Interview feedback for this CV",
+          detail: `Source bullet: “${suggestion.source_bullet}”\n\nObserved: ${suggestion.interview_evidence}\n\nNext edit: ${suggestion.suggestion}`,
+          scoreBoost: 0,
+          action: "experience" as const,
+        })),
         { id: `${jobDraftId}-rationale`, title: "Why Athena selected this content", detail: variant.rationale, scoreBoost: 0, action: "summary" as const },
         ...(variant.omitted_notable.length > 0
           ? [{ id: `${jobDraftId}-omitted`, title: "Master-profile content left out", detail: `Less relevant for this job: ${variant.omitted_notable.join(", ")}. You can add it back if needed.`, scoreBoost: 0, action: "experience" as const }]
@@ -364,6 +387,12 @@ export default function Home({ interviewSessionId }: { interviewSessionId?: stri
       {activeTab === "drafts" && (
         <DraftsDashboard
           jobs={jobs}
+          jobsLoading={jobsLoading}
+          jobsError={jobsError}
+          onRefreshJobs={() => {
+            setJobsLoading(true);
+            setJobsRefreshVersion((version) => version + 1);
+          }}
           onTailorCV={handleTailorCV}
         />
       )}
