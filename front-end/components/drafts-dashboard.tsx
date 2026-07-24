@@ -105,6 +105,13 @@ type EmailNotificationResponse = {
   question: string;
 };
 
+type ApplicationResponse = {
+  job_id: string;
+  status: "not_applied" | "applied" | "interview" | "offer" | "rejected" | "accepted" | "withdrawn";
+  applied_at: string | null;
+  last_activity_at: string;
+};
+
 interface DraftsDashboardProps {
   jobs: JobMatching[];
   drafts: CVDraft[];
@@ -127,8 +134,6 @@ const EMPTY_PROFILE_PREFERENCES: CandidatePreferences = {
   work_authorization: "",
   salary_expectation: "",
 };
-export const APPLICATION_STORAGE_KEY = "athena-job-applications-v1";
-
 export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardProps) {
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
   const [profileRecord, setProfileRecord] = useState<ProfileRecord | null>(null);
@@ -153,7 +158,6 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   const [tailorUploadFile, setTailorUploadFile] = useState<File | null>(null);
   const [applications, setApplications] = useState<Record<string, TrackedApplication>>({});
   const [applicationFilter, setApplicationFilter] = useState<ApplicationStatus | "ALL">("ALL");
-  const [applicationsReady, setApplicationsReady] = useState(false);
   const filteredJobs = useMemo(() => {
     const query = jobSearch.trim().toLowerCase();
     return jobs.filter((job) => {
@@ -177,12 +181,6 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
         throw new Error(payload?.detail || "Could not update this email decision");
       }
       setEmailDecisions((current) => current.map((decision) => decision.id === id ? { ...decision, state } : decision));
-      if (state === "confirmed") {
-        const decision = emailDecisions.find((item) => item.id === id);
-        const targetStatus = decision ? decisionStatus(decision.detectedStatus) : null;
-        const matchingJob = decision ? findMatchingJob(jobs, decision.company, decision.role) : undefined;
-        if (matchingJob && targetStatus) updateApplicationStatus(matchingJob.id, targetStatus);
-      }
     } catch (error) {
       setEmailError(error instanceof Error ? error.message : "Could not update this email decision");
     } finally {
@@ -190,19 +188,27 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
     }
   };
 
-  const updateApplicationStatus = (jobId: string, status: ApplicationStatus) => {
-    setApplications((current) => {
-      const previous = current[jobId];
-      return {
-        ...current,
-        [jobId]: {
-          jobId,
-          status,
-          appliedAt: previous?.appliedAt ?? (status === "APPLIED" ? new Date().toISOString() : undefined),
-          updatedAt: new Date().toISOString(),
-        },
-      };
+  const updateApplicationStatus = async (jobId: string, status: ApplicationStatus) => {
+    const response = await fetch(`${EMAIL_API_URL}/email-services/applications/${jobId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: status.toLowerCase().replaceAll(" ", "_") }),
     });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      setEmailError(payload?.detail || "Could not update application status");
+      return;
+    }
+    const saved = await response.json() as ApplicationResponse;
+    setApplications((current) => ({
+      ...current,
+      [saved.job_id]: {
+        jobId: saved.job_id,
+        status: saved.status.replaceAll("_", " ").toUpperCase() as ApplicationStatus,
+        appliedAt: saved.applied_at ?? undefined,
+        updatedAt: saved.last_activity_at,
+      },
+    }));
   };
 
   useEffect(() => {
@@ -229,17 +235,32 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
   }, []);
 
   useEffect(() => {
-    const loadSavedApplications = window.setTimeout(() => {
+    let active = true;
+    const loadApplications = async () => {
       try {
-        const saved = window.localStorage.getItem(APPLICATION_STORAGE_KEY);
-        if (saved) setApplications(JSON.parse(saved) as Record<string, TrackedApplication>);
-      } catch {
-        window.localStorage.removeItem(APPLICATION_STORAGE_KEY);
-      } finally {
-        setApplicationsReady(true);
+        const response = await fetch(`${EMAIL_API_URL}/email-services/applications`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Could not load application statuses");
+        const rows = await response.json() as ApplicationResponse[];
+        if (!active) return;
+        setApplications(Object.fromEntries(rows.map((row) => [
+          row.job_id,
+          {
+            jobId: row.job_id,
+            status: row.status.replaceAll("_", " ").toUpperCase() as ApplicationStatus,
+            appliedAt: row.applied_at ?? undefined,
+            updatedAt: row.last_activity_at,
+          },
+        ])));
+      } catch (error) {
+        if (active) setEmailError(error instanceof Error ? error.message : "Could not load application statuses");
       }
-    }, 0);
-    return () => window.clearTimeout(loadSavedApplications);
+    };
+    void loadApplications();
+    const poll = window.setInterval(() => void loadApplications(), EMAIL_POLL_INTERVAL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+    };
   }, []);
 
   const handleProfileCVUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -293,10 +314,6 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
       setProfileSaving(false);
     }
   };
-
-  useEffect(() => {
-    if (applicationsReady) window.localStorage.setItem(APPLICATION_STORAGE_KEY, JSON.stringify(applications));
-  }, [applications, applicationsReady]);
 
   useEffect(() => {
     let active = true;
@@ -481,7 +498,7 @@ export function DraftsDashboard({ jobs, drafts, onTailorCV }: DraftsDashboardPro
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
                     <button type="button" onClick={() => setExpandedJobId(expanded ? null : job.id)} className="flex items-center gap-1 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-400">{expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}{expanded ? "Hide match details" : `${job.skillsMatched.length} skills matched`}</button>
-                    <div className="flex flex-wrap items-center gap-2">{applicationStatus === "NOT APPLIED" ? <Button size="sm" onClick={() => { if (job.url) window.open(job.url, "_blank", "noopener,noreferrer"); updateApplicationStatus(job.id, "APPLIED"); }} className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-700"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Apply</Button> : <select aria-label={`Update ${job.title} application status`} value={applicationStatus} onChange={(event) => updateApplicationStatus(job.id, event.target.value as ApplicationStatus)} className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[11px] font-semibold dark:border-zinc-800 dark:bg-zinc-950">{APPLICATION_STATUSES.filter((status) => status !== "NOT APPLIED").map((status) => <option key={status} value={status}>{status}</option>)}</select>}<Button size="sm" variant="outline" onClick={() => { setTailorJobId(job.id); setSourceDraftId(drafts[0]?.id ?? ""); setTailorUploadName(null); setTailorUploadFile(null); }} className="h-8 text-xs"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Enhance CV</Button></div>
+                    <div className="flex flex-wrap items-center gap-2">{applicationStatus === "NOT APPLIED" ? <Button size="sm" onClick={() => { if (job.url) window.open(job.url, "_blank", "noopener,noreferrer"); void updateApplicationStatus(job.id, "APPLIED"); }} className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-700"><ExternalLink className="mr-1.5 h-3.5 w-3.5" />Apply</Button> : <select aria-label={`Update ${job.title} application status`} value={applicationStatus} onChange={(event) => void updateApplicationStatus(job.id, event.target.value as ApplicationStatus)} className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[11px] font-semibold dark:border-zinc-800 dark:bg-zinc-950">{APPLICATION_STATUSES.filter((status) => status !== "NOT APPLIED").map((status) => <option key={status} value={status}>{status}</option>)}</select>}<Button size="sm" variant="outline" onClick={() => { setTailorJobId(job.id); setSourceDraftId(drafts[0]?.id ?? ""); setTailorUploadName(null); setTailorUploadFile(null); }} className="h-8 text-xs"><Sparkles className="mr-1.5 h-3.5 w-3.5" />Enhance CV</Button></div>
                   </div>
                   {expanded && <div className="mt-3 grid gap-3 rounded-lg bg-zinc-50 p-3 text-xs dark:bg-zinc-900 sm:grid-cols-2"><div><p className="font-semibold text-emerald-700 dark:text-emerald-400">Matched</p><p className="mt-1 leading-relaxed text-zinc-500">{job.skillsMatched.join(", ")}</p></div><div><p className="font-semibold text-amber-700 dark:text-amber-400">Gaps to review</p><p className="mt-1 leading-relaxed text-zinc-500">{gaps.join(", ") || "No major gaps detected"}</p></div></div>}
                 </article>
@@ -587,20 +604,6 @@ function MatchBadge({ score }: { score: number }) {
 
 function ApplicationStatusBadge({ status }: { status: ApplicationStatus }) {
   return <Badge className={cn("border px-2 py-0.5 text-[9px] font-bold shadow-none", status === "NOT APPLIED" && "border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900", status === "APPLIED" && "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-400", status === "INTERVIEW" && "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/30 dark:text-indigo-400", ["OFFER", "ACCEPTED"].includes(status) && "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-400", ["REJECTED", "WITHDRAWN"].includes(status) && "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-400")}>{status}</Badge>;
-}
-
-function decisionStatus(status: EmailDecision["detectedStatus"]): ApplicationStatus | null {
-  if (status === "Interview") return "INTERVIEW";
-  if (status === "Offer") return "OFFER";
-  if (status === "Rejected") return "REJECTED";
-  return null;
-}
-
-function findMatchingJob(jobs: JobMatching[], company: string, role: string): JobMatching | undefined {
-  const normalizedCompany = company.trim().toLowerCase();
-  const normalizedRole = role.trim().toLowerCase();
-  return jobs.find((job) => job.company.trim().toLowerCase() === normalizedCompany && job.title.trim().toLowerCase() === normalizedRole)
-    ?? jobs.find((job) => job.company.toLowerCase().includes(normalizedCompany) || normalizedCompany.includes(job.company.toLowerCase()));
 }
 
 function intentStatus(intent: EmailNotificationResponse["intent"]): EmailDecision["detectedStatus"] {

@@ -26,7 +26,7 @@ import {
 import { toast } from "sonner";
 import { HelpCircle, Sparkles, RotateCcw, CheckCircle2, ChevronRight, FileText, AlertTriangle, Play, Pause, Timer, ClipboardList, Loader2, PhoneCall, MessagesSquare, Code2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { APPLICATION_STORAGE_KEY, CVDraft, TrackedApplication } from "../drafts-dashboard";
+import { CVDraft } from "../drafts-dashboard";
 import { JobPosting } from "../jobs-dashboard";
 import { CVData } from "../cv-editor/cv-pdf-preview";
 import {
@@ -242,18 +242,25 @@ export function InterviewWorkspace({ drafts, cvDatabase, jobs, initialSessionId,
   }, []);
 
   useEffect(() => {
-    const load = window.setTimeout(() => {
+    let active = true;
+    const loadApplications = async () => {
       try {
-        const saved = window.localStorage.getItem(APPLICATION_STORAGE_KEY);
-        const applications = saved ? JSON.parse(saved) as Record<string, TrackedApplication> : {};
-        setAppliedJobs(jobs.filter((job) => ["APPLIED", "INTERVIEW"].includes(applications[job.id]?.status ?? "")));
+        const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8008").replace(/\/$/, "");
+        const response = await fetch(`${apiUrl}/email-services/applications`, { cache: "no-store" });
+        if (!response.ok) throw new Error("Could not load application statuses");
+        const applications = await response.json() as Array<{ job_id: string; status: string }>;
+        const eligibleJobIds = new Set(applications.filter((application) => ["applied", "interview"].includes(application.status)).map((application) => application.job_id));
+        if (active) setAppliedJobs(jobs.filter((job) => eligibleJobIds.has(job.id)));
       } catch {
-        setAppliedJobs([]);
+        if (active) setAppliedJobs([]);
       } finally {
-        setApplicationsReady(true);
+        if (active) setApplicationsReady(true);
       }
-    }, 0);
-    return () => window.clearTimeout(load);
+    };
+    void loadApplications();
+    return () => {
+      active = false;
+    };
   }, [jobs]);
 
   const targetJobs = appliedJobs;

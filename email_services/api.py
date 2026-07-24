@@ -5,6 +5,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
+from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, status
@@ -21,6 +22,7 @@ WATCHER_TASK_NAME = "inbox-watcher"
 ATTENTION_TABLE = "needs_attention"
 EMAILS_TABLE = "emails"
 APPLICATION_VIEW = "application_overview"
+APPLICATIONS_TABLE = "applications"
 TRANSITION_RPC = "apply_watcher_transition"
 API_PREFIX = "/email-services"
 DEFAULT_FRONTEND_ORIGIN = "http://localhost:3001"
@@ -51,6 +53,33 @@ class AttentionActionResult(BaseModel):
 
     id: str
     resolution: str
+
+
+ApplicationStatus = Literal[
+    "not_applied",
+    "applied",
+    "interview",
+    "offer",
+    "rejected",
+    "accepted",
+    "withdrawn",
+]
+
+
+class ApplicationRecord(BaseModel):
+    """Return the database-owned status for one job application."""
+
+    id: str
+    job_id: str
+    status: ApplicationStatus
+    applied_at: str | None
+    last_activity_at: str
+
+
+class ApplicationStatusUpdate(BaseModel):
+    """Constrain manual board movements to statuses supported by Supabase."""
+
+    status: ApplicationStatus
 
 
 def _required_environment(name: str) -> str:
@@ -122,6 +151,70 @@ def _load_application(db: Client, application_id: str) -> dict[str, object]:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
     return row
+
+
+def _application_record(row: dict[str, object]) -> ApplicationRecord:
+    """Validate Supabase application rows before returning them to the browser."""
+    return ApplicationRecord.model_validate(row)
+
+
+@router.get("/applications", response_model=list[ApplicationRecord])
+def list_applications() -> list[ApplicationRecord]:
+    """Make Supabase the source of truth for the application board."""
+    db = create_watcher_db_client()
+    response = (
+        db.table(APPLICATION_VIEW)
+        .select("id,job_id,status,applied_at,last_activity_at")
+        .execute()
+    )
+    rows = response.data if isinstance(response.data, list) else []
+    return [
+        _application_record(dict(row))
+        for row in rows
+        if isinstance(row, dict)
+    ]
+
+
+@router.patch("/applications/{job_id}", response_model=ApplicationRecord)
+def update_application_status(
+    job_id: str,
+    update: ApplicationStatusUpdate,
+) -> ApplicationRecord:
+    """Persist a manual drag-and-drop movement instead of writing browser storage."""
+    db = create_watcher_db_client()
+    current_response = (
+        db.table(APPLICATIONS_TABLE)
+        .select("id,job_id,status,applied_at,last_activity_at")
+        .eq("job_id", job_id)
+        .limit(1)
+        .execute()
+    )
+    current = _single_row(current_response.data)
+    now = datetime.now(UTC).isoformat()
+
+    if current is None:
+        payload: dict[str, object] = {"job_id": job_id, "status": update.status}
+        if update.status != "not_applied":
+            payload["applied_at"] = now
+        response = db.table(APPLICATIONS_TABLE).insert(payload).execute()
+    else:
+        payload = {"status": update.status}
+        if not current.get("applied_at") and update.status != "not_applied":
+            payload["applied_at"] = now
+        response = (
+            db.table(APPLICATIONS_TABLE)
+            .update(payload)
+            .eq("id", str(current["id"]))
+            .execute()
+        )
+
+    row = _single_row(response.data)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase did not return the updated application",
+        )
+    return _application_record(row)
 
 
 @router.get("/notifications", response_model=list[EmailNotification])
