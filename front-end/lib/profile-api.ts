@@ -108,7 +108,7 @@ async function profileRequest<T>(
     if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error("Profile processing timed out. Please try the upload again.");
     }
-    throw new Error("Could not reach Athena Backend at http://localhost:8008.");
+    throw new Error(`Could not reach the backend at ${PROFILE_API_URL}.`);
   }
 
   if (!response.ok) {
@@ -123,6 +123,9 @@ async function profileRequest<T>(
     throw new ProfileApiError(message, response.status);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 
@@ -168,6 +171,12 @@ export function uploadCV(
 
 export function getCVUploads(userId: string): Promise<CVUploadRecord[]> {
   return profileRequest<CVUploadRecord[]>("/profile/uploads", userId);
+}
+
+export function deleteCVUpload(userId: string, uploadId: string): Promise<void> {
+  return profileRequest<void>(`/profile/uploads/${uploadId}`, userId, {
+    method: "DELETE",
+  });
 }
 
 export type SelectedItem = {

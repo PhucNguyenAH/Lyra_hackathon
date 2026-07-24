@@ -214,6 +214,23 @@ def list_cv_uploads(profile_id: str) -> list[dict[str, str]]:
     return uploads
 
 
+def delete_cv_upload(profile_id: str, upload_id: str) -> bool:
+    """Remove one upload's provenance row, scoped to its owning profile.
+
+    Returns True if a row was deleted. The already-merged master profile is left
+    intact — this only removes the upload from the visible history.
+    """
+    response = (
+        _get_client()
+        .table(CV_UPLOADS_TABLE)
+        .delete()
+        .eq("id", upload_id)
+        .eq("profile_id", profile_id)
+        .execute()
+    )
+    return bool(response.data)
+
+
 def get_application_jd(application_id: str) -> str:
     response = (
         _get_client()

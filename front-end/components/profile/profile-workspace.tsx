@@ -36,6 +36,7 @@ import {
   MasterProfile,
   ProfileApiError,
   ProfileRecord,
+  deleteCVUpload,
   getCVUploads,
   getProfile,
   tailorApplication,
@@ -202,6 +203,7 @@ export function ProfileWorkspace({
   const [scrapeTitle, setScrapeTitle] = useState("");
   const [scrapeLocation, setScrapeLocation] = useState("");
   const [showScrapeBar, setShowScrapeBar] = useState(false);
+  const [deletingUploadId, setDeletingUploadId] = useState<string | null>(null);
   const [isScraping, setIsScraping] = useState(false);
 
   const loadProfile = useCallback(async () => {
@@ -261,6 +263,20 @@ export function ProfileWorkspace({
       toast.error(error instanceof Error ? error.message : "CV upload failed");
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleDeleteUpload = async (uploadId: string) => {
+    if (!USER_ID) return;
+    setDeletingUploadId(uploadId);
+    try {
+      await deleteCVUpload(USER_ID, uploadId);
+      setUploads((prev) => prev.filter((upload) => upload.id !== uploadId));
+      toast.success("Resume removed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove resume");
+    } finally {
+      setDeletingUploadId(null);
     }
   };
 
@@ -452,6 +468,20 @@ export function ProfileWorkspace({
                     <p className="text-xs text-zinc-500">{new Date(upload.created_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</p>
                   </div>
                   <Check className="size-4 text-emerald-600" />
+                  <button
+                    type="button"
+                    aria-label={`Remove ${upload.label}`}
+                    title="Remove resume"
+                    onClick={() => handleDeleteUpload(upload.id)}
+                    disabled={deletingUploadId === upload.id}
+                    className="flex size-8 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {deletingUploadId === upload.id ? (
+                      <LoaderCircle className="size-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="size-4" />
+                    )}
+                  </button>
                 </div>
               ))}
             </div>

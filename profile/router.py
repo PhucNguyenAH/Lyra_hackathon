@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from profile.db import (
     ProfileNotFoundError,
     ProfileVersionConflictError,
+    delete_cv_upload,
     get_application_jd,
     get_master_for_user,
     get_or_create_profile,
@@ -156,6 +157,22 @@ def read_cv_uploads(
         return list_cv_uploads(profile.id)
     except ProfileNotFoundError as error:
         raise _profile_error(error) from error
+
+
+@router.delete(f"{API_PREFIX}/uploads/{{upload_id}}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_cv_upload(
+    upload_id: str,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> None:
+    try:
+        profile = get_master_for_user(user_id)
+    except ProfileNotFoundError as error:
+        raise _profile_error(error) from error
+    if not delete_cv_upload(profile.id, upload_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="CV upload not found",
+        )
 
 
 @router.post("/applications/{application_id}/tailor", response_model=CVVariant)

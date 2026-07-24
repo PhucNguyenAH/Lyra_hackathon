@@ -74,7 +74,7 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
         master=merged,
         expected_version=current.version,
     )
-    identity_updates = {
+    identity_updates: dict[str, object] = {
         field: getattr(current.preferences, field) or getattr(extracted, field)
         for field in (
             "display_name",
@@ -83,9 +83,16 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
             "current_location",
         )
     }
-    if identity_updates != {
-        field: getattr(current.preferences, field) for field in identity_updates
-    }:
+    # Auto-seed the target job title from the resume's current title when the
+    # user hasn't chosen one yet, so the job scrape has a sensible default.
+    if not current.preferences.target_titles and extracted.current_title:
+        identity_updates["target_titles"] = [extracted.current_title]
+
+    changed = any(
+        value != getattr(current.preferences, field)
+        for field, value in identity_updates.items()
+    )
+    if changed:
         save_preferences(
             profile_id=profile_id,
             preferences=current.preferences.model_copy(update=identity_updates),
