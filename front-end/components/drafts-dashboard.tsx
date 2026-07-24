@@ -485,6 +485,7 @@ export function DraftsDashboard({ jobs, onTailorCV }: DraftsDashboardProps) {
 function ExtractedFactsEditor({ master, onChange }: { master: MasterProfile; onChange: (master: MasterProfile) => void }) {
   const updateExperience = (index: number, changes: Partial<MasterProfile["experiences"][number]>) => onChange({ ...master, experiences: master.experiences.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) });
   const updateProject = (index: number, changes: Partial<MasterProfile["projects"][number]>) => onChange({ ...master, projects: master.projects.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) });
+  const updateEducation = (index: number, changes: Partial<MasterProfile["education"][number]>) => onChange({ ...master, education: master.education.map((item, itemIndex) => itemIndex === index ? { ...item, ...changes } : item) });
 
   return <div className="mt-5 space-y-5">
     <div>
@@ -529,8 +530,12 @@ function ExtractedFactsEditor({ master, onChange }: { master: MasterProfile; onC
     </div>
 
     <div>
-      <div className="mb-2 flex items-center justify-between"><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Education</p><Button type="button" size="xs" variant="ghost" onClick={() => onChange({ ...master, education: [...master.education, ""] })}><Plus className="h-3 w-3" />Add education</Button></div>
-      <div className="space-y-2">{master.education.map((education, index) => <div key={index} className="flex items-center gap-2"><Input value={education} onChange={(event) => onChange({ ...master, education: master.education.map((item, itemIndex) => itemIndex === index ? event.target.value : item) })} className="h-11" /><Button type="button" size="icon-sm" variant="ghost" aria-label="Remove education" onClick={() => onChange({ ...master, education: master.education.filter((_, itemIndex) => itemIndex !== index) })}><X className="h-3.5 w-3.5" /></Button></div>)}</div>
+      <div className="mb-2 flex items-center justify-between"><div><p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Education</p><p className="text-[10px] text-zinc-400">WAM is optional. Keep coursework and awards as separate items.</p></div><Button type="button" size="xs" variant="ghost" onClick={() => onChange({ ...master, education: [...master.education, { id: `edu-new-${Date.now()}`, institution: "", degree: "", field_of_study: "", location: "", date_range: "", wam: null, coursework: [], honours_awards: [] }] })}><Plus className="h-3 w-3" />Add education</Button></div>
+      <div className="space-y-3">{master.education.map((education, index) => <div key={education.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+        <div className="mb-3 flex items-center justify-between gap-3"><code className="truncate text-[10px] text-zinc-400">{education.id}</code><Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove ${education.institution || "education"}`} onClick={() => onChange({ ...master, education: master.education.filter((_, itemIndex) => itemIndex !== index) })}><Trash2 className="h-3.5 w-3.5 text-rose-500" /></Button></div>
+        <div className="grid gap-3 sm:grid-cols-2"><ProfileField label="Institution" value={education.institution} onChange={(institution) => updateEducation(index, { institution })} /><ProfileField label="Degree" value={education.degree} onChange={(degree) => updateEducation(index, { degree })} /><ProfileField label="Field of study / major" value={education.field_of_study} onChange={(field_of_study) => updateEducation(index, { field_of_study })} /><ProfileField label="Date range" value={education.date_range} onChange={(date_range) => updateEducation(index, { date_range })} /><ProfileField label="Location" value={education.location} onChange={(location) => updateEducation(index, { location })} /><ProfileField label="WAM (optional)" value={education.wam ?? ""} onChange={(wam) => updateEducation(index, { wam: wam || null })} /></div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2"><div><label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Relevant coursework</label><Textarea value={education.coursework.join("\n")} onChange={(event) => updateEducation(index, { coursework: splitLines(event.target.value) })} rows={5} placeholder="One course per line" className="resize-y text-sm" /></div><div><label className="mb-1.5 block text-xs font-semibold text-zinc-700 dark:text-zinc-300">Honours &amp; awards</label><Textarea value={education.honours_awards.join("\n")} onChange={(event) => updateEducation(index, { honours_awards: splitLines(event.target.value) })} rows={5} placeholder="One award or honour per line" className="resize-y text-sm" /></div></div>
+      </div>)}</div>
     </div>
   </div>;
 }
@@ -545,6 +550,10 @@ function ProfileChoices<T extends string>({ label, options, values, onChange }: 
 
 function splitList(value: string): string[] {
   return value.split(",").map((item) => item.trimStart());
+}
+
+function splitLines(value: string): string[] {
+  return value.split("\n").map((item) => item.trim()).filter(Boolean);
 }
 
 function cleanList(values: string[]): string[] {

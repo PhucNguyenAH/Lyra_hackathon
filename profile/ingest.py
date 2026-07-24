@@ -22,9 +22,7 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
     current = get_profile(profile_id)
     client = create_structured_client()
 
-    extracted = cast(
-        ExtractedCV,
-        client.chat.completions.create(
+    extracted_result = client.chat.completions.create(
             model=MODEL_NAME,
             response_model=ExtractedCV,
             messages=[
@@ -35,7 +33,11 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
             ],
             temperature=MODEL_TEMPERATURE,
             max_retries=MAX_RETRIES,
-        ),
+        )
+    extracted = (
+        extracted_result
+        if isinstance(extracted_result, ExtractedCV)
+        else ExtractedCV(master=MasterProfile.model_validate(extracted_result))
     )
 
     merged = cast(

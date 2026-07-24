@@ -44,12 +44,19 @@ export interface EducationItem {
   degree: string;
   location: string;
   dateRange: string;
+  wam?: string;
+  coursework?: string[];
+  honoursAwards?: string[];
   details: string[];
 }
 
 export interface CVDataExtended extends CVData {
   projects: ProjectItem[];
   educationList: EducationItem[];
+}
+
+function splitEditorLines(value: string): string[] {
+  return value.split("\n").map((item) => item.trim()).filter(Boolean);
 }
 
 export function CVEditorWorkspace({
@@ -250,6 +257,9 @@ export function CVEditorWorkspace({
       degree: "Computer Science Degree",
       location: "Sydney, NSW",
       dateRange: "2024 - 2026",
+      wam: "",
+      coursework: [],
+      honoursAwards: [],
       details: ["Specialized coursework in advanced algorithms."],
     };
     setCvData((prev) => ({ ...prev, educationList: [...prev.educationList, newEdu] }));
@@ -275,7 +285,7 @@ export function CVEditorWorkspace({
     });
   };
 
-  const handleEducationChange = (index: number, field: "school" | "degree" | "location" | "dateRange", value: string) => {
+  const handleEducationChange = (index: number, field: "school" | "degree" | "location" | "dateRange" | "wam", value: string) => {
     setCvData((prev) => {
       const updated = [...prev.educationList];
       updated[index] = { ...updated[index], [field]: value };
@@ -895,6 +905,18 @@ export function CVEditorWorkspace({
                           <label className="text-[10px] font-bold text-zinc-455">Date Range</label>
                           <Input value={edu.dateRange} onChange={(e) => handleEducationChange(eduIdx, "dateRange", e.target.value)} className="h-9 text-xs bg-white border border-zinc-250 rounded-lg shadow-none" />
                         </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-455">WAM (optional)</label>
+                        <Input value={edu.wam ?? ""} onChange={(e) => handleEducationChange(eduIdx, "wam", e.target.value)} placeholder="e.g. 92.375 - High Distinction" className="h-9 text-xs bg-white border border-zinc-250 rounded-lg shadow-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-455">Relevant Coursework</label>
+                        <Textarea value={(edu.coursework ?? []).join("\n")} onChange={(event) => setCvData((current) => ({ ...current, educationList: current.educationList.map((item, index) => index === eduIdx ? { ...item, coursework: splitEditorLines(event.target.value) } : item) }))} rows={4} placeholder="One course per line" className="text-xs bg-white border border-zinc-250 rounded-lg shadow-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-zinc-455">Honours &amp; Awards</label>
+                        <Textarea value={(edu.honoursAwards ?? []).join("\n")} onChange={(event) => setCvData((current) => ({ ...current, educationList: current.educationList.map((item, index) => index === eduIdx ? { ...item, honoursAwards: splitEditorLines(event.target.value) } : item) }))} rows={4} placeholder="One award or honour per line" className="text-xs bg-white border border-zinc-250 rounded-lg shadow-none" />
                       </div>
                     </div>
                   ))}

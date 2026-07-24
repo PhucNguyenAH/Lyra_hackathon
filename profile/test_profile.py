@@ -9,6 +9,7 @@ from profile import db, ingest, tailor
 from profile.db import ProfileVersionConflictError
 from profile.schemas import (
     CVVariant,
+    Education,
     MasterProfile,
     ProfileRecord,
     Project,
@@ -19,6 +20,26 @@ from profile.schemas import (
 
 CV_BACKEND = """PASTE BACKEND CV TEXT HERE"""
 CV_QUANT = """PASTE QUANT CV TEXT HERE"""
+
+
+def test_education_is_structured_and_legacy_strings_remain_loadable() -> None:
+    structured = Education(
+        id="edu-macquarie-bit-ai",
+        institution="Macquarie University",
+        degree="Bachelor of Information Technology",
+        field_of_study="Major in Artificial Intelligence",
+        date_range="Feb 2025 - Expected 2027",
+        wam="92.375 - High Distinction",
+        coursework=["Data Structure & Algorithms"],
+        honours_awards=["Dean’s List 2026"],
+    )
+
+    profile = MasterProfile(education=[structured])
+    legacy = MasterProfile.model_validate({"education": ["Macquarie University"]})
+
+    assert profile.education[0].wam == "92.375 - High Distinction"
+    assert legacy.education[0].institution == "Macquarie University"
+    assert legacy.education[0].degree == ""
 
 
 class FakeCompletions:

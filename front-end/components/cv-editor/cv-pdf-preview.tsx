@@ -36,6 +36,9 @@ export interface CVData {
     degree: string;
     location: string;
     dateRange: string;
+    wam?: string;
+    coursework?: string[];
+    honoursAwards?: string[];
     details: string[];
   }[];
   achievements?: string[];
@@ -411,6 +414,9 @@ export function CVPDFPreview({ cvData, onExport }: CVPDFPreviewProps) {
                         </div>
                       </div>
                       <ul className="list-disc pl-4 space-y-0.5 text-zinc-600 leading-relaxed">
+                        {edu.wam && <li>WAM: {edu.wam}</li>}
+                        {edu.coursework && edu.coursework.length > 0 && <li>Relevant Coursework: {edu.coursework.join(", ")}</li>}
+                        {edu.honoursAwards && edu.honoursAwards.length > 0 && <li>Honours &amp; Awards: {edu.honoursAwards.join(", ")}</li>}
                         {edu.details.map((detail, dIdx) => (
                           <li key={dIdx}>{detail}</li>
                         ))}

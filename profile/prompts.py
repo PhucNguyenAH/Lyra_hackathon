@@ -28,6 +28,22 @@ EXTRACTION:
   wording inside bullets untouched.
 - Assign item ids in the pattern exp-{{org-slug}} / proj-{{name-slug}}.
 
+EDUCATION:
+- Create one structured education item per qualification, using an id in the
+  pattern edu-{{institution-slug}}-{{degree-slug}}.
+- institution is the school or university name. degree is the qualification
+  name. field_of_study is the major, specialization, or study area when shown.
+- date_range must preserve the CV wording exactly, including "Expected".
+- wam is optional. Copy it only when explicitly stated, preserving both the
+  number and classification (for example "92.375 - High Distinction").
+- coursework contains individual course names only. Split a coursework list
+  into separate array items without paraphrasing.
+- honours_awards contains individual academic honours, prizes, scholarships,
+  Dean's List entries, or university competition awards. Split them into
+  separate items without inventing or combining facts.
+- Do not put the whole education paragraph into institution, degree, or one
+  array item. Return empty strings, empty arrays, or null for missing fields.
+
 TAGGING:
 - Tag every experience and project with role_flavors it supports,
   chosen only from: backend, frontend, fullstack, ai, ml, data, devops,
@@ -61,6 +77,10 @@ MERGING:
   specific/quantified one and drop the other.
 - Same project under different names or descriptions = ONE project;
   merge the details.
+- Same qualification at the same institution = ONE education item. Match
+  institution and degree case-insensitively, preserve the existing id, fill
+  missing scalar fields from either version, and union coursework and
+  honours_awards without duplicates.
 - NEVER remove a fact that exists in the current master unless it is a
   duplicate of something you are keeping. Merges only add or dedupe.
 - Preserve existing item ids exactly. New items retain the ids assigned

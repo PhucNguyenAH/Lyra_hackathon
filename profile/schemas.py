@@ -74,12 +74,45 @@ class Project(BaseModel):
     )
 
 
+class Education(BaseModel):
+    """Keep education facts separate so repeated CV uploads can be deduplicated."""
+
+    id: str
+    institution: str
+    degree: str = ""
+    field_of_study: str = ""
+    location: str = ""
+    date_range: str = ""
+    wam: str | None = None
+    coursework: list[str] = Field(default_factory=list)
+    honours_awards: list[str] = Field(default_factory=list)
+
+
 class MasterProfile(BaseModel):
     summary: str = ""
     skills: list[Skill] = Field(default_factory=list)
     experiences: list[Experience] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
-    education: list[str] = Field(default_factory=list)
+    education: list[Education] = Field(default_factory=list)
+
+    @field_validator("education", mode="before")
+    @classmethod
+    def normalize_legacy_education(cls, value: Any) -> Any:
+        """Load old string-only profiles without losing their original text."""
+        if not isinstance(value, list):
+            return value
+        normalized: list[Any] = []
+        for index, item in enumerate(value):
+            if isinstance(item, str):
+                normalized.append(
+                    {
+                        "id": f"edu-legacy-{index}",
+                        "institution": item,
+                    }
+                )
+            else:
+                normalized.append(item)
+        return normalized
 
     @classmethod
     def empty(cls) -> "MasterProfile":

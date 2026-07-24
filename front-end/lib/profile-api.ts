@@ -42,12 +42,24 @@ export type ProfileProject = {
   role_flavors: RoleFlavor[];
 };
 
+export type ProfileEducation = {
+  id: string;
+  institution: string;
+  degree: string;
+  field_of_study: string;
+  location: string;
+  date_range: string;
+  wam: string | null;
+  coursework: string[];
+  honours_awards: string[];
+};
+
 export type MasterProfile = {
   summary: string;
   skills: ProfileSkill[];
   experiences: ProfileExperience[];
   projects: ProfileProject[];
-  education: string[];
+  education: ProfileEducation[];
 };
 
 export type CandidatePreferences = {
