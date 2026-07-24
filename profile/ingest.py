@@ -83,9 +83,10 @@ def ingest_cv(profile_id: str, raw_text: str, label: str) -> MasterProfile:
             "current_location",
         )
     }
-    # Auto-seed the target job title from the resume's current title when the
-    # user hasn't chosen one yet, so the job scrape has a sensible default.
-    if not current.preferences.target_titles and extracted.current_title:
+    # The uploaded resume drives the target job title for the job scrape: always
+    # reflect the title freshly extracted from THIS resume, so a new upload
+    # replaces a stale title instead of keeping the previous one.
+    if extracted.current_title:
         identity_updates["target_titles"] = [extracted.current_title]
 
     changed = any(
