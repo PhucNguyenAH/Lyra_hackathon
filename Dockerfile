@@ -1,12 +1,15 @@
-# Backend image for the job-scraping API (FastAPI + Playwright).
+# Backend image for the COMBINED backend (server:app = scraper API + Athena).
 #
-# Build context is the REPO ROOT (not front-end/), because the image needs both
-# the `api/` package and the `linkedin_scraper/` package.
+# Build context is the REPO ROOT (not front-end/): the image needs the scraper
+# packages (`api/`, `linkedin_scraper/`) AND the Athena packages
+# (`email_services/`, `interview/`, `profile/`, `server.py`).
 #
 # The base image is Microsoft's official Playwright-for-Python image: it ships
 # Chromium plus all the OS libraries Chromium needs, already matched to the
 # Playwright version in the tag (v1.61.0 == playwright==1.61.0 in requirements).
-FROM mcr.microsoft.com/playwright/python:v1.61.0-jammy
+# noble (Ubuntu 24.04) ships Python 3.12 — required: the Athena code uses
+# datetime.UTC and other 3.11+ features (jammy's Python 3.10 can't import them).
+FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 
 # Fail fast, unbuffered logs (so container logs stream in real time).
 ENV PYTHONUNBUFFERED=1 \
@@ -15,8 +18,11 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Install Python deps first so this layer is cached across code changes.
+# requirements-server.txt pulls in api/requirements.txt plus the Athena feature
+# deps (groq, instructor, markitdown, rapidfuzz, python-multipart).
 COPY api/requirements.txt ./api/requirements.txt
-RUN pip install --no-cache-dir -r api/requirements.txt
+COPY requirements-server.txt ./requirements-server.txt
+RUN pip install --no-cache-dir -r requirements-server.txt
 
 # Chromium is already in the base image; this is a defensive no-op that
 # guarantees the browser matching the installed Playwright version is present.
@@ -30,9 +36,14 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         xvfb x11vnc fluxbox \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only the backend source (see .dockerignore for what's excluded).
+# Copy the backend source (see .dockerignore for what's excluded).
 COPY api/ ./api/
 COPY linkedin_scraper/ ./linkedin_scraper/
+# Athena packages served by the combined server:app.
+COPY email_services/ ./email_services/
+COPY interview/ ./interview/
+COPY profile/ ./profile/
+COPY server.py ./server.py
 
 # IMPORTANT: linkedin_session.json is NOT copied into the image — it holds live
 # LinkedIn cookies. Provide it at runtime via a secret mount / volume and point

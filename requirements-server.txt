@@ -1,0 +1,14 @@
+# Runtime dependencies for the COMBINED backend image (server:app).
+#
+# = the scraper API deps (api/requirements.txt) PLUS the Athena feature deps
+# (interview, profile/CV tailoring, email watcher). Kept separate from the
+# repo-root requirements.txt so the heavy embedding/extractor deps (vllm, numpy,
+# sqlalchemy, psycopg2, py2neo) are NOT pulled into the deploy image.
+-r api/requirements.txt
+
+# Athena features
+groq>=0.13.0            # interview + CV extraction LLM client
+instructor>=1.7.0       # structured LLM output
+markitdown[pdf]>=0.1.6  # PDF/text CV -> markdown for extraction
+rapidfuzz>=3.10.0       # fuzzy matching in the interview/email flow
+python-multipart>=0.0.12  # FastAPI multipart parsing for CV uploads
